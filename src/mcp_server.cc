@@ -58,8 +58,8 @@
 
 // MCP 커맨드라인 플래그 정의
 // 실제 배포 시 난독화된 이름으로 교체 가능
-constexpr char kMcpStdioSwitch[] = "mcp-stdio";
-constexpr char kMcpSocketSwitch[] = "mcp-socket";
+// 커맨드라인 스위치는 chrome_main_delegate.cc에서 처리.
+// ShouldStart()는 기본 활성화이므로 여기서는 사용하지 않음.
 constexpr char kMcpEnvVar[] = "CHROMIUM_MCP";
 
 // MCP 프로토콜 버전 (2024-11-05 스펙 준수)
@@ -108,23 +108,16 @@ void McpServer::StartWithSocket(const std::string& socket_path) {
 
 // static
 bool McpServer::ShouldStart() {
-  // 1. 커맨드라인 플래그 확인
-  const base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
-  if (cmd->HasSwitch(kMcpStdioSwitch) || cmd->HasSwitch(kMcpSocketSwitch)) {
-    LOG(INFO) << "[MCP] 커맨드라인 플래그로 MCP 서버 활성화";
-    return true;
-  }
-
-  // 2. 환경변수 확인 (CHROMIUM_MCP=1)
-  // 플래그보다 은닉성이 높은 활성화 방법
+  // CHROMIUM_MCP=0 으로 명시적 비활성화하지 않는 한 항상 활성화.
+  // 기본 브라우저로 사용해도 MCP 서버가 상시 동작한다.
   std::unique_ptr<base::Environment> env = base::Environment::Create();
   auto env_value = env->GetVar(kMcpEnvVar);
-  if (env_value.has_value() && *env_value == "1") {
-    LOG(INFO) << "[MCP] 환경변수로 MCP 서버 활성화";
-    return true;
+  if (env_value.has_value() && *env_value == "0") {
+    LOG(INFO) << "[MCP] 환경변수로 MCP 서버 비활성화";
+    return false;
   }
 
-  return false;
+  return true;
 }
 
 bool McpServer::Initialize(std::unique_ptr<Config> config,
