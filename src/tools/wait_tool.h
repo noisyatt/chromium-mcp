@@ -41,8 +41,8 @@ class WaitTool : public McpTool {
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
-  void Execute(const base::Value::Dict& arguments,
+  base::DictValue input_schema() const override;
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 
@@ -87,6 +87,8 @@ class WaitTool : public McpTool {
 
   // 폴링 상태를 관리하는 컨텍스트 구조체
   struct PollContext {
+    PollContext();
+    ~PollContext();
     std::string condition_label;     // 로그/에러 메시지용 설명
     std::string js_expression;       // 평가할 JS 표현식
     int timeout_ms;

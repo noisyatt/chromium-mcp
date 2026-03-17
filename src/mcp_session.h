@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "base/containers/span.h"
 #include "base/functional/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -24,11 +25,16 @@ namespace mcp {
 // CDP 명령 완료 시 호출되는 콜백 타입.
 // result: CDP 응답의 "result" 필드 (성공 시), error: 오류 메시지 (실패 시)
 using CdpResponseCallback =
-    base::OnceCallback<void(std::optional<base::Value::Dict> result,
+    base::OnceCallback<void(std::optional<base::DictValue> result,
                             const std::string& error)>;
 
 // 캡처된 네트워크 요청 정보 구조체
 struct NetworkRequest {
+  NetworkRequest();
+  ~NetworkRequest();
+  NetworkRequest(NetworkRequest&&);
+  NetworkRequest& operator=(NetworkRequest&&);
+
   std::string request_id;    // CDP Network.requestId
   std::string url;           // 요청 URL
   std::string method;        // HTTP 메서드 (GET, POST 등)
@@ -61,7 +67,7 @@ class McpSession : public content::DevToolsAgentHostClient {
   // 현재는 사용되지 않지만, 서버-사이드 이벤트 스트리밍 구현 시 활용 예정.
   McpSession(
       scoped_refptr<content::DevToolsAgentHost> agent_host,
-      base::RepeatingCallback<void(base::Value::Dict)> send_message_callback);
+      base::RepeatingCallback<void(base::DictValue)> send_message_callback);
 
   McpSession(const McpSession&) = delete;
   McpSession& operator=(const McpSession&) = delete;
@@ -98,16 +104,16 @@ class McpSession : public content::DevToolsAgentHostClient {
   // params: CDP 명령 파라미터 (JSON 객체)
   // callback: 응답 수신 시 호출 (BrowserThread::UI에서 실행)
   void SendCdpCommand(const std::string& method,
-                      base::Value::Dict params,
+                      base::DictValue params,
                       CdpResponseCallback callback);
 
   // 도구 구현용 간편 오버로드.
   // CdpResponseCallback 대신 base::Value 단일 인자 콜백을 받는다.
-  // 내부에서 result/error를 base::Value::Dict로 변환하여 전달:
+  // 내부에서 result/error를 base::DictValue로 변환하여 전달:
   //   - 성공 시: {"result": {CDP 응답 데이터}}
   //   - 실패 시: {"error": {"message": "오류 메시지"}}
   void SendCdpCommand(const std::string& method,
-                      base::Value::Dict params,
+                      base::DictValue params,
                       base::OnceCallback<void(base::Value)> callback);
 
   // -----------------------------------------------------------------------
@@ -119,7 +125,7 @@ class McpSession : public content::DevToolsAgentHostClient {
   // params: 이벤트 파라미터
   using CdpEventHandler =
       base::RepeatingCallback<void(const std::string& event_name,
-                                   const base::Value::Dict& params)>;
+                                   const base::DictValue& params)>;
 
   // 특정 CDP 이벤트에 대한 핸들러를 등록한다.
   // 같은 이벤트 이름에 대해 중복 등록하면 기존 핸들러를 덮어쓴다.
@@ -152,7 +158,7 @@ class McpSession : public content::DevToolsAgentHostClient {
   // CDP 메시지 수신 콜백. DevToolsAgentHost가 응답/이벤트 전달 시 호출.
   // message: JSON 직렬화된 CDP 응답 또는 이벤트
   void DispatchProtocolMessage(content::DevToolsAgentHost* agent_host,
-                                const std::string& message) override;
+                                base::span<const uint8_t> message) override;
 
   // CDP 세션 비정상 종료 시 호출 (탭 닫힘, 크래시 등)
   void AgentHostClosed(content::DevToolsAgentHost* agent_host) override;
@@ -163,30 +169,30 @@ class McpSession : public content::DevToolsAgentHostClient {
   // -----------------------------------------------------------------------
 
   // 수신된 CDP 메시지를 파싱하여 응답 또는 이벤트로 분류
-  void HandleCdpMessage(const base::Value::Dict& message);
+  void HandleCdpMessage(const base::DictValue& message);
 
   // CDP 명령 응답 처리: id를 통해 대기 중인 콜백 찾아 실행
-  void HandleCdpResponse(int id, const base::Value::Dict& message);
+  void HandleCdpResponse(int id, const base::DictValue& message);
 
   // CDP 이벤트 처리 (응답이 아닌 서버 푸시 메시지)
   void HandleCdpEvent(const std::string& method,
-                       const base::Value::Dict* params);
+                       const base::DictValue* params);
 
   // -----------------------------------------------------------------------
   // CDP 이벤트 핸들러 (네트워크 모니터링)
   // -----------------------------------------------------------------------
 
   // Network.requestWillBeSent: 새 네트워크 요청 시작 시 호출
-  void OnNetworkRequestWillBeSent(const base::Value::Dict& params);
+  void OnNetworkRequestWillBeSent(const base::DictValue& params);
 
   // Network.responseReceived: 응답 헤더 수신 시 호출
-  void OnNetworkResponseReceived(const base::Value::Dict& params);
+  void OnNetworkResponseReceived(const base::DictValue& params);
 
   // Network.loadingFinished: 응답 본문 로드 완료 시 호출
-  void OnNetworkLoadingFinished(const base::Value::Dict& params);
+  void OnNetworkLoadingFinished(const base::DictValue& params);
 
   // Network.loadingFailed: 요청 실패 시 호출
-  void OnNetworkLoadingFailed(const base::Value::Dict& params);
+  void OnNetworkLoadingFailed(const base::DictValue& params);
 
   // -----------------------------------------------------------------------
   // 유틸리티
@@ -204,7 +210,7 @@ class McpSession : public content::DevToolsAgentHostClient {
   scoped_refptr<content::DevToolsAgentHost> agent_host_;
 
   // McpServer로 알림을 전달하는 콜백
-  base::RepeatingCallback<void(base::Value::Dict)> send_message_callback_;
+  base::RepeatingCallback<void(base::DictValue)> send_message_callback_;
 
   // CDP 세션 연결 상태
   bool is_attached_ = false;

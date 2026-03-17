@@ -35,8 +35,8 @@ class KeyboardTool : public McpTool {
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
-  void Execute(const base::Value::Dict& arguments,
+  base::DictValue input_schema() const override;
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 
@@ -95,7 +95,7 @@ class KeyboardTool : public McpTool {
 
   // modifiers 문자열 배열을 CDP 비트 플래그 정수로 변환한다.
   // Alt=1, Ctrl=2, Meta=4, Shift=8
-  static int ComputeModifiers(const base::Value::List* modifiers_list);
+  static int ComputeModifiers(const base::ListValue* modifiers_list);
 
   // CDP 에러 응답 처리 헬퍼
   static bool HandleCdpError(const base::Value& response,

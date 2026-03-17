@@ -31,8 +31,8 @@ class CookieTool : public McpTool {
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
-  void Execute(const base::Value::Dict& arguments,
+  base::DictValue input_schema() const override;
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 
@@ -46,13 +46,13 @@ class CookieTool : public McpTool {
 
   // action=set 처리: Network.setCookie 호출.
   // name, value는 필수. domain/path/secure/httpOnly/sameSite/expirationDate는 선택.
-  void HandleSet(const base::Value::Dict& arguments,
+  void HandleSet(const base::DictValue& arguments,
                  McpSession* session,
                  base::OnceCallback<void(base::Value)> callback);
 
   // action=delete 처리: Network.deleteCookies 호출.
   // name은 필수. url 또는 domain으로 범위 지정.
-  void HandleDelete(const base::Value::Dict& arguments,
+  void HandleDelete(const base::DictValue& arguments,
                     McpSession* session,
                     base::OnceCallback<void(base::Value)> callback);
 

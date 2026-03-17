@@ -19,7 +19,7 @@ namespace mcp {
 // selector 있을 때: DOM.querySelector → DOM.getBoxModel → clip 계산 →
 //                  Page.captureScreenshot(clip=...) 순서로 비동기 체인 실행
 //
-// 결과는 base64 인코딩된 이미지 데이터를 포함하는 base::Value::Dict 이다.
+// 결과는 base64 인코딩된 이미지 데이터를 포함하는 base::DictValue 이다.
 class ScreenshotTool : public McpTool {
  public:
   ScreenshotTool();
@@ -28,8 +28,8 @@ class ScreenshotTool : public McpTool {
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
-  void Execute(const base::Value::Dict& arguments,
+  base::DictValue input_schema() const override;
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 

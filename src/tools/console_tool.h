@@ -48,8 +48,8 @@ class ConsoleTool : public McpTool {
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
-  void Execute(const base::Value::Dict& arguments,
+  base::DictValue input_schema() const override;
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 
@@ -70,7 +70,7 @@ class ConsoleTool : public McpTool {
   // Log.entryAdded 이벤트 핸들러.
   // 이벤트 파라미터에서 entry(level, text, timestamp, url, lineNumber)를 추출한다.
   void OnLogEntryAdded(const std::string& event_name,
-                       const base::Value::Dict& params);
+                       const base::DictValue& params);
 
   // safe_mode=false: Runtime.enable 호출 후 Runtime.consoleAPICalled 핸들러 등록.
   // 주의: Runtime.enable은 DevTools 감지 위험이 있다. 필요할 때만 사용할 것.
@@ -85,7 +85,7 @@ class ConsoleTool : public McpTool {
   // Runtime.consoleAPICalled 이벤트 핸들러.
   // args 배열(RemoteObject)에서 메시지 텍스트를 조합한다.
   void OnConsoleApiCalled(const std::string& event_name,
-                          const base::Value::Dict& params);
+                          const base::DictValue& params);
 
   // -----------------------------------------------------------------------
   // 캡처 중지 / 조회 / 클리어
@@ -112,7 +112,7 @@ class ConsoleTool : public McpTool {
   // -----------------------------------------------------------------------
 
   // CDP RuntimeAPI args 배열(RemoteObject[])에서 텍스트를 조합한다.
-  static std::string ExtractTextFromArgs(const base::Value::List& args);
+  static std::string ExtractTextFromArgs(const base::ListValue& args);
 
   // |msg_level|이 |level_filter| 조건에 부합하는지 검사한다.
   // level_filter == "all"이면 항상 true.
@@ -125,7 +125,7 @@ class ConsoleTool : public McpTool {
 
   // 캡처된 콘솔 메시지 버퍼.
   // 각 항목: {level, text, timestamp, url, lineNumber}
-  std::vector<base::Value::Dict> messages_;
+  std::vector<base::DictValue> messages_;
 
   // 현재 캡처 중인지 여부
   bool is_capturing_ = false;

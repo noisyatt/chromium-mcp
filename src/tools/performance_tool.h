@@ -42,8 +42,8 @@ class PerformanceTool : public McpTool {
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
-  void Execute(const base::Value::Dict& arguments,
+  base::DictValue input_schema() const override;
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 
@@ -91,12 +91,12 @@ class PerformanceTool : public McpTool {
   // Tracing.dataCollected 이벤트 핸들러.
   // 트레이스 데이터는 여러 청크로 분할 전달되므로 trace_chunks_에 누적한다.
   void OnTraceDataCollected(const std::string& event_name,
-                             const base::Value::Dict& params);
+                             const base::DictValue& params);
 
   // Tracing.tracingComplete 이벤트 핸들러.
   // 모든 데이터가 전달됐음을 알리는 신호. 누적 데이터를 반환 콜백에 전달한다.
   void OnTracingComplete(const std::string& event_name,
-                          const base::Value::Dict& params);
+                          const base::DictValue& params);
 
   // Tracing.end 응답 처리
   void OnTraceEnded(base::OnceCallback<void(base::Value)> callback,
@@ -115,8 +115,8 @@ class PerformanceTool : public McpTool {
   // 헬퍼
   // -----------------------------------------------------------------------
 
-  // categories 문자열을 base::Value::List로 파싱한다.
-  static base::Value::List ParseCategories(const std::string& categories);
+  // categories 문자열을 base::ListValue로 파싱한다.
+  static base::ListValue ParseCategories(const std::string& categories);
 
   // -----------------------------------------------------------------------
   // 상태
@@ -126,8 +126,8 @@ class PerformanceTool : public McpTool {
   bool is_tracing_ = false;
 
   // Tracing.dataCollected 이벤트로 수신된 트레이스 이벤트 청크 누적 버퍼.
-  // 각 청크는 base::Value::List 형태이다.
-  std::vector<base::Value::List> trace_chunks_;
+  // 각 청크는 base::ListValue 형태이다.
+  std::vector<base::ListValue> trace_chunks_;
 
   // stopTrace 완료 콜백 (Tracing.tracingComplete 이벤트 수신 시 호출됨)
   base::OnceCallback<void(base::Value)> stop_trace_callback_;

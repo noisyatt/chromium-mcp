@@ -12,8 +12,12 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/render_frame_host.h"
@@ -35,21 +39,21 @@ std::string BrowserInfoTool::description() const {
          "총 탭 수, 창 수, 플랫폼 정보를 포함합니다.";
 }
 
-base::Value::Dict BrowserInfoTool::input_schema() const {
+base::DictValue BrowserInfoTool::input_schema() const {
   // 입력 파라미터 없음: 빈 스키마 반환
-  base::Value::Dict schema;
+  base::DictValue schema;
   schema.Set("type", "object");
-  schema.Set("properties", base::Value::Dict());
+  schema.Set("properties", base::DictValue());
   return schema;
 }
 
 void BrowserInfoTool::Execute(
-    const base::Value::Dict& arguments,
+    const base::DictValue& arguments,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   LOG(INFO) << "[MCP][BrowserInfo] 브라우저 정보 수집 시작";
 
-  base::Value::Dict info;
+  base::DictValue info;
 
   // ── 버전 정보 ──────────────────────────────────────────────────────────────
   // version_info::GetVersionNumber(): "120.0.6099.130" 형태의 문자열 반환
@@ -63,7 +67,7 @@ void BrowserInfoTool::Execute(
   // 빌드 채널 (예: "stable", "beta", "dev", "canary")
   // version_info::GetChannelString(): 채널 이름 반환
   info.Set("channel",
-           std::string(version_info::GetChannelString()));
+           std::string(version_info::GetChannelString(chrome::GetChannel())));
 
   // ── User-Agent ─────────────────────────────────────────────────────────────
   info.Set("userAgent", GetUserAgentString());
@@ -72,17 +76,13 @@ void BrowserInfoTool::Execute(
   info.Set("platform", GetPlatformString());
 
   // ── 창 및 탭 통계 ──────────────────────────────────────────────────────────
-  const BrowserList* browser_list = BrowserList::GetInstance();
-  int window_count = 0;
-  if (browser_list) {
-    // BrowserList::size()는 현재 열린 Browser 창 수
-    window_count = static_cast<int>(browser_list->size());
-  }
+  auto all_windows = GetAllBrowserWindowInterfaces();
+  int window_count = static_cast<int>(all_windows.size());
   info.Set("windowCount", window_count);
   info.Set("tabCount", GetTotalTabCount());
 
   // ── 활성 탭 정보 ──────────────────────────────────────────────────────────
-  base::Value::Dict active_tab = GetActiveTabInfo();
+  base::DictValue active_tab = GetActiveTabInfo();
   if (!active_tab.empty()) {
     info.Set("activeTab", std::move(active_tab));
   } else {
@@ -99,9 +99,9 @@ void BrowserInfoTool::Execute(
 
   LOG(INFO) << "[MCP][BrowserInfo] 브라우저 정보 수집 완료";
 
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict content_item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue content_item;
   content_item.Set("type", "text");
   content_item.Set("text", json_str);
   content.Append(std::move(content_item));
@@ -111,36 +111,30 @@ void BrowserInfoTool::Execute(
 }
 
 // static
-base::Value::Dict BrowserInfoTool::GetActiveTabInfo() {
-  // BrowserList에서 가장 최근에 활성화된 Browser를 찾는다.
-  // GetLastActive()는 포커스된 창을 반환한다.
-  const BrowserList* browser_list = BrowserList::GetInstance();
-  if (!browser_list) {
-    return base::Value::Dict();
-  }
-
-  Browser* active_browser = browser_list->GetLastActive();
+base::DictValue BrowserInfoTool::GetActiveTabInfo() {
+  // 가장 최근에 활성화된 Browser를 찾는다.
+  Browser* active_browser = chrome::FindLastActive();
   if (!active_browser) {
-    return base::Value::Dict();
+    return base::DictValue();
   }
 
   TabStripModel* tab_strip = active_browser->tab_strip_model();
   if (!tab_strip) {
-    return base::Value::Dict();
+    return base::DictValue();
   }
 
   // 현재 활성 탭의 WebContents
   content::WebContents* active_contents = tab_strip->GetActiveWebContents();
   if (!active_contents) {
-    return base::Value::Dict();
+    return base::DictValue();
   }
 
-  base::Value::Dict tab_info;
+  base::DictValue tab_info;
 
   // 탭 ID: RenderFrameHost의 FrameTreeNodeId를 사용
   content::RenderFrameHost* rfh = active_contents->GetPrimaryMainFrame();
   if (rfh) {
-    tab_info.Set("id", rfh->GetFrameTreeNodeId());
+    tab_info.Set("id", static_cast<int>(rfh->GetFrameTreeNodeId().GetUnsafeValue()));
   }
 
   // URL: 현재 커밋된 URL
@@ -163,13 +157,11 @@ base::Value::Dict BrowserInfoTool::GetActiveTabInfo() {
 
 // static
 int BrowserInfoTool::GetTotalTabCount() {
-  const BrowserList* browser_list = BrowserList::GetInstance();
-  if (!browser_list) {
-    return 0;
-  }
+  auto all_windows = GetAllBrowserWindowInterfaces();
 
   int total = 0;
-  for (Browser* browser : *browser_list) {
+  for (BrowserWindowInterface* bwi : all_windows) {
+    Browser* browser = bwi->GetBrowserForMigrationOnly();
     if (!browser) {
       continue;
     }

@@ -8,10 +8,15 @@
 
 #include "base/json/json_writer.h"
 #include "base/logging.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/browser/navigation_controller.h"
@@ -36,17 +41,17 @@ std::string TabsTool::description() const {
          "CDP를 경유하지 않고 Chromium 내부 TabStripModel API를 직접 호출합니다.";
 }
 
-base::Value::Dict TabsTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue TabsTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // action: 필수 파라미터
   {
-    base::Value::Dict action_prop;
+    base::DictValue action_prop;
     action_prop.Set("type", "string");
-    base::Value::List action_enum;
+    base::ListValue action_enum;
     action_enum.Append("list");
     action_enum.Append("new");
     action_enum.Append("close");
@@ -62,7 +67,7 @@ base::Value::Dict TabsTool::input_schema() const {
 
   // tabId: close/select에 필요한 탭 ID
   {
-    base::Value::Dict tab_id_prop;
+    base::DictValue tab_id_prop;
     tab_id_prop.Set("type", "number");
     tab_id_prop.Set("description",
                     "대상 탭의 ID. action=close 또는 action=select 시 필수. "
@@ -72,7 +77,7 @@ base::Value::Dict TabsTool::input_schema() const {
 
   // url: new 탭 생성 시 이동할 URL
   {
-    base::Value::Dict url_prop;
+    base::DictValue url_prop;
     url_prop.Set("type", "string");
     url_prop.Set("description",
                  "action=new 시 열 URL. "
@@ -83,14 +88,14 @@ base::Value::Dict TabsTool::input_schema() const {
   schema.Set("properties", std::move(properties));
 
   // action만 필수
-  base::Value::List required;
+  base::ListValue required;
   required.Append("action");
   schema.Set("required", std::move(required));
 
   return schema;
 }
 
-void TabsTool::Execute(const base::Value::Dict& arguments,
+void TabsTool::Execute(const base::DictValue& arguments,
                        McpSession* session,
                        base::OnceCallback<void(base::Value)> callback) {
   // action 파라미터 추출
@@ -135,19 +140,12 @@ void TabsTool::Execute(const base::Value::Dict& arguments,
 void TabsTool::HandleList(base::OnceCallback<void(base::Value)> callback) {
   // BrowserList를 순회하며 모든 탭 정보를 수집한다.
   // BrowserList는 현재 열려있는 모든 Browser 창의 목록이다.
-  base::Value::List tabs_list;
+  base::ListValue tabs_list;
 
-  const BrowserList* browser_list = BrowserList::GetInstance();
-  if (!browser_list) {
-    LOG(ERROR) << "[MCP][Tabs] BrowserList 인스턴스 없음";
-    std::move(callback).Run(MakeError("BrowserList를 가져올 수 없습니다"));
-    return;
-  }
-
-  for (Browser* browser : *browser_list) {
-    if (!browser) {
-      continue;
-    }
+  auto all_windows = GetAllBrowserWindowInterfaces();
+  for (BrowserWindowInterface* bwi : all_windows) {
+    Browser* browser = bwi->GetBrowserForMigrationOnly();
+    if (!browser) continue;
 
     TabStripModel* tab_strip = browser->tab_strip_model();
     if (!tab_strip) {
@@ -164,7 +162,7 @@ void TabsTool::HandleList(base::OnceCallback<void(base::Value)> callback) {
       }
 
       bool is_active = (i == active_index);
-      base::Value::Dict tab_dict =
+      base::DictValue tab_dict =
           SerializeTab(web_contents, i, is_active);
 
       // 어느 브라우저 창에 속하는지 식별 정보 추가
@@ -179,7 +177,7 @@ void TabsTool::HandleList(base::OnceCallback<void(base::Value)> callback) {
   LOG(INFO) << "[MCP][Tabs] 탭 목록 반환: " << tabs_list.size() << "개";
 
   // 결과 직렬화
-  base::Value::Dict data;
+  base::DictValue data;
   data.Set("tabCount", static_cast<int>(tabs_list.size()));
   data.Set("tabs", std::move(tabs_list));
 
@@ -189,9 +187,9 @@ void TabsTool::HandleList(base::OnceCallback<void(base::Value)> callback) {
       base::JSONWriter::OPTIONS_PRETTY_PRINT,
       &json_str);
 
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict content_item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue content_item;
   content_item.Set("type", "text");
   content_item.Set("text", json_str);
   content.Append(std::move(content_item));
@@ -203,8 +201,7 @@ void TabsTool::HandleList(base::OnceCallback<void(base::Value)> callback) {
 void TabsTool::HandleNew(const std::string& url,
                          base::OnceCallback<void(base::Value)> callback) {
   // 현재 활성 Browser를 찾는다.
-  // BrowserList::GetInstance()->GetLastActive() 로 가장 최근 창을 선택.
-  Browser* browser = BrowserList::GetInstance()->GetLastActive();
+  Browser* browser = chrome::FindLastActive();
   if (!browser) {
     LOG(ERROR) << "[MCP][Tabs] 활성 Browser 창 없음";
     std::move(callback).Run(MakeError("열린 브라우저 창이 없습니다"));
@@ -243,7 +240,7 @@ void TabsTool::HandleNew(const std::string& url,
 
   TabStripModel* tab_strip = browser->tab_strip_model();
   int new_index = tab_strip->GetIndexOfWebContents(new_contents);
-  base::Value::Dict tab_info =
+  base::DictValue tab_info =
       SerializeTab(new_contents, new_index, true);
 
   std::string json_str;
@@ -258,12 +255,10 @@ void TabsTool::HandleNew(const std::string& url,
 void TabsTool::HandleClose(int tab_id,
                            base::OnceCallback<void(base::Value)> callback) {
   // BrowserList를 순회하며 tabId가 일치하는 WebContents를 찾는다.
-  const BrowserList* browser_list = BrowserList::GetInstance();
-
-  for (Browser* browser : *browser_list) {
-    if (!browser) {
-      continue;
-    }
+  auto all_windows = GetAllBrowserWindowInterfaces();
+  for (BrowserWindowInterface* bwi : all_windows) {
+    Browser* browser = bwi->GetBrowserForMigrationOnly();
+    if (!browser) continue;
 
     TabStripModel* tab_strip = browser->tab_strip_model();
     if (!tab_strip) {
@@ -305,12 +300,10 @@ void TabsTool::HandleClose(int tab_id,
 void TabsTool::HandleSelect(int tab_id,
                             base::OnceCallback<void(base::Value)> callback) {
   // BrowserList를 순회하며 tabId가 일치하는 WebContents를 찾아 활성화한다.
-  const BrowserList* browser_list = BrowserList::GetInstance();
-
-  for (Browser* browser : *browser_list) {
-    if (!browser) {
-      continue;
-    }
+  auto all_windows = GetAllBrowserWindowInterfaces();
+  for (BrowserWindowInterface* bwi : all_windows) {
+    Browser* browser = bwi->GetBrowserForMigrationOnly();
+    if (!browser) continue;
 
     TabStripModel* tab_strip = browser->tab_strip_model();
     if (!tab_strip) {
@@ -338,7 +331,7 @@ void TabsTool::HandleSelect(int tab_id,
         // Browser 창 자체도 foreground로 올린다.
         browser->window()->Activate();
 
-        base::Value::Dict tab_info =
+        base::DictValue tab_info =
             SerializeTab(web_contents, i, true);
         std::string json_str;
         base::JSONWriter::WriteWithOptions(
@@ -381,15 +374,17 @@ int TabsTool::GetTabId(content::WebContents* web_contents) {
   }
 
   // FrameTreeNodeId: 브라우저 생명주기 동안 고유한 프레임 식별자
-  return rfh->GetFrameTreeNodeId();
+  // FrameTreeNodeId는 base::IdType<..., int32_t> 타입이므로
+  // GetUnsafeValue()로 내부 int32_t 값을 꺼낸다.
+  return static_cast<int>(rfh->GetFrameTreeNodeId().GetUnsafeValue());
 }
 
 // static
-base::Value::Dict TabsTool::SerializeTab(
+base::DictValue TabsTool::SerializeTab(
     content::WebContents* web_contents,
     int tab_index,
     bool is_active) {
-  base::Value::Dict dict;
+  base::DictValue dict;
 
   dict.Set("id", GetTabId(web_contents));
   dict.Set("index", tab_index);
@@ -413,10 +408,10 @@ base::Value::Dict TabsTool::SerializeTab(
 
 // static
 base::Value TabsTool::MakeError(const std::string& message) {
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("isError", true);
-  base::Value::List content;
-  base::Value::Dict content_item;
+  base::ListValue content;
+  base::DictValue content_item;
   content_item.Set("type", "text");
   content_item.Set("text", "오류: " + message);
   content.Append(std::move(content_item));
@@ -426,9 +421,9 @@ base::Value TabsTool::MakeError(const std::string& message) {
 
 // static
 base::Value TabsTool::MakeSuccess(const std::string& text) {
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict content_item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue content_item;
   content_item.Set("type", "text");
   content_item.Set("text", text);
   content.Append(std::move(content_item));

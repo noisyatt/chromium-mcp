@@ -19,9 +19,9 @@ namespace {
 
 // MCP 성공 응답 Value 생성.
 base::Value MakeSuccessResult(const std::string& text) {
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue item;
   item.Set("type", "text");
   item.Set("text", text);
   content.Append(std::move(item));
@@ -32,9 +32,9 @@ base::Value MakeSuccessResult(const std::string& text) {
 
 // MCP 에러 응답 Value 생성.
 base::Value MakeErrorResult(const std::string& text) {
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue item;
   item.Set("type", "text");
   item.Set("text", text);
   content.Append(std::move(item));
@@ -60,7 +60,7 @@ std::string ValueToJson(const base::Value& value) {
 //   1. value       (returnByValue=true 일 때 실제 값)
 //   2. description (객체·함수·에러 등의 문자열 표현)
 //   3. type        (값이 없을 때 타입 이름만 반환)
-std::string RemoteObjectToString(const base::Value::Dict& remote_obj) {
+std::string RemoteObjectToString(const base::DictValue& remote_obj) {
   // 1. 원시값(primitive) 처리: returnByValue=true면 value 키에 실제 값이 있다.
   const base::Value* value = remote_obj.Find("value");
   if (value) {
@@ -107,8 +107,8 @@ std::string RemoteObjectToString(const base::Value::Dict& remote_obj) {
 
 // Runtime.evaluate 응답에서 예외 정보를 추출한다.
 // exceptionDetails가 없으면 빈 문자열 반환.
-std::string ExtractExceptionMessage(const base::Value::Dict& result_dict) {
-  const base::Value::Dict* exception = result_dict.FindDict("exceptionDetails");
+std::string ExtractExceptionMessage(const base::DictValue& result_dict) {
+  const base::DictValue* exception = result_dict.FindDict("exceptionDetails");
   if (!exception) {
     return "";
   }
@@ -117,7 +117,7 @@ std::string ExtractExceptionMessage(const base::Value::Dict& result_dict) {
   const std::string* text = exception->FindString("text");
 
   // exceptionDetails.exception: RemoteObject (상세 에러 객체)
-  const base::Value::Dict* exc_obj = exception->FindDict("exception");
+  const base::DictValue* exc_obj = exception->FindDict("exception");
   std::string exc_desc;
   if (exc_obj) {
     const std::string* desc = exc_obj->FindString("description");
@@ -150,20 +150,20 @@ std::string JavaScriptTool::description() const {
          "isolatedWorld=true이면 페이지 JS에서 감지할 수 없는 격리된 컨텍스트에서 실행합니다.";
 }
 
-base::Value::Dict JavaScriptTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue JavaScriptTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // expression: 실행할 JS 코드
-  base::Value::Dict expr_prop;
+  base::DictValue expr_prop;
   expr_prop.Set("type", "string");
   expr_prop.Set("description", "실행할 JavaScript 표현식 또는 코드 블록");
   properties.Set("expression", std::move(expr_prop));
 
   // awaitPromise: Promise 결과 대기 여부
-  base::Value::Dict await_prop;
+  base::DictValue await_prop;
   await_prop.Set("type", "boolean");
   await_prop.Set("default", true);
   await_prop.Set("description",
@@ -172,7 +172,7 @@ base::Value::Dict JavaScriptTool::input_schema() const {
   properties.Set("awaitPromise", std::move(await_prop));
 
   // isolatedWorld: 격리된 컨텍스트에서 실행 여부
-  base::Value::Dict isolated_prop;
+  base::DictValue isolated_prop;
   isolated_prop.Set("type", "boolean");
   isolated_prop.Set("default", false);
   isolated_prop.Set("description",
@@ -184,7 +184,7 @@ base::Value::Dict JavaScriptTool::input_schema() const {
   schema.Set("properties", std::move(properties));
 
   // expression은 필수
-  base::Value::List required;
+  base::ListValue required;
   required.Append("expression");
   schema.Set("required", std::move(required));
 
@@ -192,7 +192,7 @@ base::Value::Dict JavaScriptTool::input_schema() const {
 }
 
 void JavaScriptTool::Execute(
-    const base::Value::Dict& arguments,
+    const base::DictValue& arguments,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   const std::string* expression = arguments.FindString("expression");
@@ -235,7 +235,7 @@ void JavaScriptTool::EvaluateInMainWorld(
     bool await_promise,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("expression", expression);
 
   // returnByValue: 결과를 JSON 직렬화 가능한 값으로 받는다.
@@ -270,7 +270,7 @@ void JavaScriptTool::GetFrameTreeForIsolatedWorld(
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   session->SendCdpCommand(
-      "Page.getFrameTree", base::Value::Dict(),
+      "Page.getFrameTree", base::DictValue(),
       base::BindOnce(&JavaScriptTool::OnGetFrameTree,
                      weak_factory_.GetWeakPtr(),
                      expression, await_promise,
@@ -291,7 +291,7 @@ void JavaScriptTool::OnGetFrameTree(
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict || dict->Find("error") != nullptr) {
     LOG(ERROR) << "[JavaScriptTool] Page.getFrameTree 실패";
     std::move(callback).Run(MakeErrorResult("메인 프레임 ID를 획득할 수 없습니다."));
@@ -299,9 +299,9 @@ void JavaScriptTool::OnGetFrameTree(
   }
 
   // 응답 구조: result.frameTree.frame.id
-  const base::Value::Dict* result = dict->FindDict("result");
-  const base::Value::Dict* frame_tree = result ? result->FindDict("frameTree") : nullptr;
-  const base::Value::Dict* frame = frame_tree ? frame_tree->FindDict("frame") : nullptr;
+  const base::DictValue* result = dict->FindDict("result");
+  const base::DictValue* frame_tree = result ? result->FindDict("frameTree") : nullptr;
+  const base::DictValue* frame = frame_tree ? frame_tree->FindDict("frame") : nullptr;
   const std::string* frame_id = frame ? frame->FindString("id") : nullptr;
 
   if (!frame_id || frame_id->empty()) {
@@ -312,7 +312,7 @@ void JavaScriptTool::OnGetFrameTree(
 
   LOG(INFO) << "[JavaScriptTool] 메인 프레임 ID: " << *frame_id;
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("frameId", *frame_id);
 
   // worldName: DevTools에서 표시되는 컨텍스트 이름. 빈 문자열로 익명 처리.
@@ -338,11 +338,11 @@ void JavaScriptTool::OnIsolatedWorldCreated(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
   // CDP 전송 레벨 에러 확인
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict || dict->Find("error") != nullptr) {
     std::string error_msg = "Page.createIsolatedWorld 실패";
     if (dict) {
-      const base::Value::Dict* err = dict->FindDict("error");
+      const base::DictValue* err = dict->FindDict("error");
       const std::string* msg = err ? err->FindString("message") : nullptr;
       if (msg) {
         error_msg += ": " + *msg;
@@ -354,7 +354,7 @@ void JavaScriptTool::OnIsolatedWorldCreated(
   }
 
   // result.executionContextId 추출
-  const base::Value::Dict* result = dict->FindDict("result");
+  const base::DictValue* result = dict->FindDict("result");
   std::optional<int> context_id =
       result ? result->FindInt("executionContextId") : std::nullopt;
 
@@ -368,7 +368,7 @@ void JavaScriptTool::OnIsolatedWorldCreated(
   LOG(INFO) << "[JavaScriptTool] IsolatedWorld contextId=" << *context_id;
 
   // ★ Runtime.enable 없이 특정 contextId에 Runtime.evaluate 직접 호출
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("expression", expression);
   params.Set("returnByValue", true);
   params.Set("awaitPromise", await_promise);
@@ -401,7 +401,7 @@ void JavaScriptTool::OnIsolatedWorldCreated(
 void JavaScriptTool::OnEvaluateResponse(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     LOG(ERROR) << "[JavaScriptTool] Runtime.evaluate 응답이 Dict 형식이 아님";
     std::move(callback).Run(MakeErrorResult("Runtime.evaluate 응답 형식 오류"));
@@ -410,7 +410,7 @@ void JavaScriptTool::OnEvaluateResponse(
 
   // CDP 전송 레벨 에러 (프로토콜 에러, 타임아웃 등)
   if (dict->Find("error") != nullptr) {
-    const base::Value::Dict* err = dict->FindDict("error");
+    const base::DictValue* err = dict->FindDict("error");
     const std::string* msg = err ? err->FindString("message") : nullptr;
     std::string error_str = msg ? *msg : "알 수 없는 CDP 에러";
     LOG(ERROR) << "[JavaScriptTool] CDP 에러: " << error_str;
@@ -418,7 +418,7 @@ void JavaScriptTool::OnEvaluateResponse(
     return;
   }
 
-  const base::Value::Dict* result = dict->FindDict("result");
+  const base::DictValue* result = dict->FindDict("result");
   if (!result) {
     LOG(ERROR) << "[JavaScriptTool] 응답에 result 키가 없음";
     std::move(callback).Run(MakeErrorResult("Runtime.evaluate 응답에 result 없음"));
@@ -434,7 +434,7 @@ void JavaScriptTool::OnEvaluateResponse(
   }
 
   // 정상 결과 처리
-  const base::Value::Dict* remote_obj = result->FindDict("result");
+  const base::DictValue* remote_obj = result->FindDict("result");
   if (!remote_obj) {
     // result.result가 없는 경우는 매우 드물지만 방어 처리
     LOG(WARNING) << "[JavaScriptTool] result.result RemoteObject가 없음";

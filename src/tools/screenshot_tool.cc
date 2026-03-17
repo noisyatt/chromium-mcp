@@ -23,14 +23,14 @@ std::string ScreenshotTool::description() const {
   return "현재 페이지 또는 특정 요소의 스크린샷";
 }
 
-base::Value::Dict ScreenshotTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue ScreenshotTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // fullPage: 전체 페이지 스크롤 캡처 여부 (기본값 false = 뷰포트만)
-  base::Value::Dict full_page_prop;
+  base::DictValue full_page_prop;
   full_page_prop.Set("type", "boolean");
   full_page_prop.Set("description",
                      "true이면 스크롤 포함 전체 페이지 캡처, "
@@ -39,16 +39,16 @@ base::Value::Dict ScreenshotTool::input_schema() const {
   properties.Set("fullPage", std::move(full_page_prop));
 
   // selector: 특정 요소만 캡처할 때 사용하는 CSS 선택자
-  base::Value::Dict selector_prop;
+  base::DictValue selector_prop;
   selector_prop.Set("type", "string");
   selector_prop.Set("description",
                     "캡처할 특정 요소의 CSS 선택자 (생략 시 전체 페이지)");
   properties.Set("selector", std::move(selector_prop));
 
   // format: 이미지 형식 (기본값 "png")
-  base::Value::Dict format_prop;
+  base::DictValue format_prop;
   format_prop.Set("type", "string");
-  base::Value::List format_enum;
+  base::ListValue format_enum;
   format_enum.Append("png");
   format_enum.Append("jpeg");
   format_prop.Set("enum", std::move(format_enum));
@@ -60,7 +60,7 @@ base::Value::Dict ScreenshotTool::input_schema() const {
   return schema;
 }
 
-void ScreenshotTool::Execute(const base::Value::Dict& arguments,
+void ScreenshotTool::Execute(const base::DictValue& arguments,
                              McpSession* session,
                              base::OnceCallback<void(base::Value)> callback) {
   // format 파라미터 추출 (기본값 "png")
@@ -97,7 +97,7 @@ void ScreenshotTool::CaptureFullPageScreenshot(
     bool full_page,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
-  base::Value::Dict params;
+  base::DictValue params;
   // CDP Page.captureScreenshot의 format 파라미터
   params.Set("format", format);
 
@@ -123,7 +123,7 @@ void ScreenshotTool::QuerySelectorForScreenshot(
     base::OnceCallback<void(base::Value)> callback) {
   // 1단계: DOM.getDocument로 루트 노드 ID를 가져온 후 DOM.querySelector 호출.
   // 단순화를 위해 depth=0으로 루트 노드만 가져온다.
-  base::Value::Dict get_doc_params;
+  base::DictValue get_doc_params;
   get_doc_params.Set("depth", 0);
   get_doc_params.Set("pierce", false);
 
@@ -139,17 +139,17 @@ void ScreenshotTool::QuerySelectorForScreenshot(
             // DOM.getDocument 응답에서 루트 nodeId 추출
             if (!get_doc_response.is_dict()) {
               LOG(ERROR) << "[ScreenshotTool] DOM.getDocument 응답 오류";
-              base::Value::Dict err;
+              base::DictValue err;
               err.Set("error", "DOM.getDocument 실패");
               std::move(callback).Run(base::Value(std::move(err)));
               return;
             }
 
-            const base::Value::Dict* root =
+            const base::DictValue* root =
                 get_doc_response.GetDict().FindDict("root");
             if (!root) {
               LOG(ERROR) << "[ScreenshotTool] root 노드 없음";
-              base::Value::Dict err;
+              base::DictValue err;
               err.Set("error", "DOM 루트 노드를 찾을 수 없음");
               std::move(callback).Run(base::Value(std::move(err)));
               return;
@@ -158,14 +158,14 @@ void ScreenshotTool::QuerySelectorForScreenshot(
             std::optional<int> root_node_id = root->FindInt("nodeId");
             if (!root_node_id) {
               LOG(ERROR) << "[ScreenshotTool] 루트 nodeId 없음";
-              base::Value::Dict err;
+              base::DictValue err;
               err.Set("error", "루트 nodeId 추출 실패");
               std::move(callback).Run(base::Value(std::move(err)));
               return;
             }
 
             // 2단계: DOM.querySelector로 selector에 해당하는 nodeId 취득
-            base::Value::Dict qs_params;
+            base::DictValue qs_params;
             qs_params.Set("nodeId", *root_node_id);
             qs_params.Set("selector", selector);
 
@@ -182,7 +182,7 @@ void ScreenshotTool::QuerySelectorForScreenshot(
                       if (!qs_response.is_dict()) {
                         LOG(ERROR)
                             << "[ScreenshotTool] DOM.querySelector 응답 오류";
-                        base::Value::Dict err;
+                        base::DictValue err;
                         err.Set("error", "DOM.querySelector 실패");
                         std::move(cb).Run(base::Value(std::move(err)));
                         return;
@@ -193,14 +193,14 @@ void ScreenshotTool::QuerySelectorForScreenshot(
                       if (!node_id || *node_id == 0) {
                         LOG(WARNING)
                             << "[ScreenshotTool] selector에 해당하는 요소 없음";
-                        base::Value::Dict err;
+                        base::DictValue err;
                         err.Set("error", "해당 selector의 요소를 찾을 수 없음");
                         std::move(cb).Run(base::Value(std::move(err)));
                         return;
                       }
 
                       // 3단계: DOM.getBoxModel로 요소의 위치/크기 취득
-                      base::Value::Dict bm_params;
+                      base::DictValue bm_params;
                       bm_params.Set("nodeId", *node_id);
 
                       sess->SendCdpCommand(
@@ -216,17 +216,17 @@ void ScreenshotTool::QuerySelectorForScreenshot(
                                 if (!bm_response.is_dict()) {
                                   LOG(ERROR) << "[ScreenshotTool] "
                                                 "DOM.getBoxModel 응답 오류";
-                                  base::Value::Dict err;
+                                  base::DictValue err;
                                   err.Set("error", "DOM.getBoxModel 실패");
                                   std::move(done).Run(
                                       base::Value(std::move(err)));
                                   return;
                                 }
 
-                                const base::Value::Dict* model =
+                                const base::DictValue* model =
                                     bm_response.GetDict().FindDict("model");
                                 if (!model) {
-                                  base::Value::Dict err;
+                                  base::DictValue err;
                                   err.Set("error", "boxModel 데이터 없음");
                                   std::move(done).Run(
                                       base::Value(std::move(err)));
@@ -234,10 +234,10 @@ void ScreenshotTool::QuerySelectorForScreenshot(
                                 }
 
                                 // border 배열: 8개 값 (4 꼭짓점 x,y)
-                                const base::Value::List* border =
+                                const base::ListValue* border =
                                     model->FindList("border");
                                 if (!border || border->size() < 8) {
-                                  base::Value::Dict err;
+                                  base::DictValue err;
                                   err.Set("error", "border 좌표 데이터 부족");
                                   std::move(done).Run(
                                       base::Value(std::move(err)));
@@ -258,14 +258,14 @@ void ScreenshotTool::QuerySelectorForScreenshot(
                                     << " h=" << height;
 
                                 // 4단계: clip 영역으로 Page.captureScreenshot
-                                base::Value::Dict clip;
+                                base::DictValue clip;
                                 clip.Set("x", x1);
                                 clip.Set("y", y1);
                                 clip.Set("width", width);
                                 clip.Set("height", height);
                                 clip.Set("scale", 1.0);
 
-                                base::Value::Dict cap_params;
+                                base::DictValue cap_params;
                                 cap_params.Set("format", image_format);
                                 cap_params.Set("clip", std::move(clip));
                                 cap_params.Set("captureBeyondViewport", true);
@@ -279,7 +279,7 @@ void ScreenshotTool::QuerySelectorForScreenshot(
                                            base::Value cap_response) {
                                           // 최종 스크린샷 응답 처리
                                           if (!cap_response.is_dict()) {
-                                            base::Value::Dict err;
+                                            base::DictValue err;
                                             err.Set("error",
                                                     "captureScreenshot 실패");
                                             std::move(final_cb).Run(
@@ -289,7 +289,7 @@ void ScreenshotTool::QuerySelectorForScreenshot(
                                           const std::string* data =
                                               cap_response.GetDict().FindString(
                                                   "data");
-                                          base::Value::Dict result;
+                                          base::DictValue result;
                                           if (data) {
                                             result.Set("data", *data);
                                             result.Set("success", true);
@@ -303,9 +303,9 @@ void ScreenshotTool::QuerySelectorForScreenshot(
                                         },
                                         std::move(done)));
                               },
-                              image_format, s, std::move(done)));
+                              fmt, sess, std::move(cb)));
                     },
-                    fmt, sess, std::move(cb)));
+                    format, session, std::move(callback)));
           },
           selector, format, session, std::move(callback)));
 }
@@ -317,23 +317,23 @@ void ScreenshotTool::OnCaptureScreenshotResponse(
   // 성공 시 응답에는 base64 인코딩된 이미지 데이터("data" 필드)가 포함된다.
   if (!response.is_dict()) {
     LOG(ERROR) << "[ScreenshotTool] captureScreenshot 응답 형식 오류";
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "captureScreenshot 응답 형식 오류");
     err.Set("success", false);
     std::move(callback).Run(base::Value(std::move(err)));
     return;
   }
 
-  const base::Value::Dict& dict = response.GetDict();
+  const base::DictValue& dict = response.GetDict();
 
   // CDP 오류 응답 확인
-  const base::Value::Dict* error_dict = dict.FindDict("error");
+  const base::DictValue* error_dict = dict.FindDict("error");
   if (error_dict) {
     const std::string* msg = error_dict->FindString("message");
     std::string error_msg = msg ? *msg : "알 수 없는 CDP 오류";
     LOG(ERROR) << "[ScreenshotTool] CDP 오류: " << error_msg;
 
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error", error_msg);
     std::move(callback).Run(base::Value(std::move(result)));
@@ -344,7 +344,7 @@ void ScreenshotTool::OnCaptureScreenshotResponse(
   const std::string* data = dict.FindString("data");
   if (!data || data->empty()) {
     LOG(WARNING) << "[ScreenshotTool] 이미지 데이터 비어있음";
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error", "이미지 데이터 없음");
     std::move(callback).Run(base::Value(std::move(result)));
@@ -352,7 +352,7 @@ void ScreenshotTool::OnCaptureScreenshotResponse(
   }
 
   LOG(INFO) << "[ScreenshotTool] 스크린샷 성공, data 길이=" << data->size();
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success", true);
   result.Set("data", *data);  // base64 인코딩된 이미지
   std::move(callback).Run(base::Value(std::move(result)));

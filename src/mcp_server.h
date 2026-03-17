@@ -34,14 +34,18 @@ class McpTransport;
 // tools/call 요청 시 라우팅되어 호출되는 콜백.
 // params: 도구 인자 (JSON 객체), callback: 결과 반환 콜백
 using McpToolHandler =
-    base::RepeatingCallback<void(const base::Value::Dict& params,
+    base::RepeatingCallback<void(const base::DictValue& params,
                                  base::OnceCallback<void(base::Value)> callback)>;
 
 // MCP 도구 명세 구조체. tools/list 응답에 사용됨.
 struct McpToolDefinition {
+  McpToolDefinition();
+  ~McpToolDefinition();
+  McpToolDefinition(McpToolDefinition&&);
+  McpToolDefinition& operator=(McpToolDefinition&&);
   std::string name;         // 도구 이름 (예: "navigate", "screenshot")
   std::string description;  // 도구 설명 (AI가 이해하는 자연어)
-  base::Value::Dict input_schema;  // JSON Schema 형식의 입력 파라미터 정의
+  base::DictValue input_schema;  // JSON Schema 형식의 입력 파라미터 정의
   McpToolHandler handler;   // 실제 실행 핸들러
 };
 
@@ -67,6 +71,8 @@ class McpServer {
  public:
   // MCP 서버 초기화 설정
   struct Config {
+    Config();
+    ~Config();
     McpTransportMode transport_mode = McpTransportMode::kStdio;
     std::string socket_path;         // kSocket 모드에서 사용할 경로
     std::string auth_token;          // 빈 문자열이면 인증 비활성
@@ -74,10 +80,19 @@ class McpServer {
     bool auto_attach_active_tab = true;  // 새 탭 활성화 시 자동 세션 연결
   };
 
+  // 싱글톤 접근자
+  static McpServer* GetInstance();
+
   McpServer();
   McpServer(const McpServer&) = delete;
   McpServer& operator=(const McpServer&) = delete;
   ~McpServer();
+
+  // 편의 메서드: stdio 모드로 서버 시작
+  void StartWithStdio();
+
+  // 편의 메서드: Unix 소켓 모드로 서버 시작
+  void StartWithSocket(const std::string& socket_path);
 
   // -----------------------------------------------------------------------
   // 초기화 / 종료
@@ -133,12 +148,12 @@ class McpServer {
   // -----------------------------------------------------------------------
 
   // 파싱된 JSON-RPC 메시지를 method에 따라 적절한 핸들러로 라우팅.
-  void HandleMessage(base::Value::Dict message);
+  void HandleMessage(base::DictValue message);
 
   // MCP initialize 핸드셰이크 처리.
   // 클라이언트 정보를 저장하고 serverInfo + capabilities 응답 반환.
   void HandleInitialize(const base::Value* id,
-                        const base::Value::Dict* params);
+                        const base::DictValue* params);
 
   // notifications/initialized 수신 처리.
   // 이후 도구 호출을 받을 준비 완료 상태로 전환.
@@ -151,7 +166,7 @@ class McpServer {
   // tools/call 요청 처리.
   // 요청된 도구 이름으로 핸들러를 찾아 실행.
   void HandleToolsCall(const base::Value* id,
-                       const base::Value::Dict* params);
+                       const base::DictValue* params);
 
   // 알 수 없는 method 수신 시 처리. 오류 응답 전송.
   void HandleUnknownMethod(const base::Value* id,
@@ -170,7 +185,7 @@ class McpServer {
                  const std::string& message);
 
   // base::Value 딕셔너리를 JSON 직렬화하여 transport로 전송.
-  void SendMessage(base::Value::Dict message);
+  void SendMessage(base::DictValue message);
 
   // -----------------------------------------------------------------------
   // 도구 핸들러 등록 (초기화 시 자동 등록)
@@ -198,43 +213,43 @@ class McpServer {
   // -----------------------------------------------------------------------
 
   // navigate 도구: Page.navigate CDP 명령 실행
-  void ExecuteNavigate(const base::Value::Dict& params,
+  void ExecuteNavigate(const base::DictValue& params,
                        base::OnceCallback<void(base::Value)> callback);
 
   // screenshot 도구: Page.captureScreenshot CDP 명령 실행
-  void ExecuteScreenshot(const base::Value::Dict& params,
+  void ExecuteScreenshot(const base::DictValue& params,
                          base::OnceCallback<void(base::Value)> callback);
 
   // page_content 도구: DOM.getOuterHTML / Accessibility.getFullAXTree 실행
-  void ExecutePageContent(const base::Value::Dict& params,
+  void ExecutePageContent(const base::DictValue& params,
                           base::OnceCallback<void(base::Value)> callback);
 
   // click 도구: CSS 선택자로 요소를 찾아 Input.dispatchMouseEvent 실행
-  void ExecuteClick(const base::Value::Dict& params,
+  void ExecuteClick(const base::DictValue& params,
                     base::OnceCallback<void(base::Value)> callback);
 
   // fill 도구: 입력 필드에 값을 입력 (Runtime.evaluate 활용)
-  void ExecuteFill(const base::Value::Dict& params,
+  void ExecuteFill(const base::DictValue& params,
                    base::OnceCallback<void(base::Value)> callback);
 
   // evaluate 도구: Runtime.evaluate CDP 명령 실행
-  void ExecuteEvaluate(const base::Value::Dict& params,
+  void ExecuteEvaluate(const base::DictValue& params,
                        base::OnceCallback<void(base::Value)> callback);
 
   // network_capture 도구: Network.enable/disable CDP 명령 실행
-  void ExecuteNetworkCapture(const base::Value::Dict& params,
+  void ExecuteNetworkCapture(const base::DictValue& params,
                              base::OnceCallback<void(base::Value)> callback);
 
   // network_requests 도구: 캡처된 네트워크 요청 목록 반환
-  void ExecuteNetworkRequests(const base::Value::Dict& params,
+  void ExecuteNetworkRequests(const base::DictValue& params,
                               base::OnceCallback<void(base::Value)> callback);
 
   // tabs 도구: TabStripModel API로 탭 관리
-  void ExecuteTabs(const base::Value::Dict& params,
+  void ExecuteTabs(const base::DictValue& params,
                    base::OnceCallback<void(base::Value)> callback);
 
   // browser_info 도구: 브라우저 버전, 활성 탭 정보 반환
-  void ExecuteBrowserInfo(const base::Value::Dict& params,
+  void ExecuteBrowserInfo(const base::DictValue& params,
                           base::OnceCallback<void(base::Value)> callback);
 
   // -----------------------------------------------------------------------

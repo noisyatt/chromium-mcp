@@ -22,6 +22,11 @@ namespace mcp {
 // URL 패턴과 리소스 타입이 매칭되는 요청에 자동으로 동작을 적용한다.
 // ============================================================================
 struct InterceptRule {
+  InterceptRule();
+  ~InterceptRule();
+  InterceptRule(InterceptRule&&);
+  InterceptRule& operator=(InterceptRule&&);
+
   // 규칙 고유 ID (removeRule 시 사용)
   std::string rule_id;
 
@@ -47,12 +52,12 @@ struct InterceptRule {
   // continue 동작 시 수정할 필드 (빈 문자열이면 원본 유지)
   std::string override_url;
   std::string override_method;
-  base::Value::Dict override_headers;  // 빈 dict이면 헤더 수정 없음
+  base::DictValue override_headers;  // 빈 dict이면 헤더 수정 없음
   std::string override_post_data;
 
   // fulfill 동작 시 모킹 응답
   int response_code = 200;
-  base::Value::Dict response_headers;
+  base::DictValue response_headers;
   std::string response_body;  // base64 또는 UTF-8 텍스트
 
   // fail 동작 시 에러 사유
@@ -105,8 +110,8 @@ class NetworkInterceptTool : public McpTool {
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
-  void Execute(const base::Value::Dict& arguments,
+  base::DictValue input_schema() const override;
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 
@@ -117,7 +122,7 @@ class NetworkInterceptTool : public McpTool {
 
   // action=enable: Fetch.enable 호출하여 인터셉트 시작.
   // |patterns|: Fetch.enable에 전달할 패턴 목록 (없으면 전체 인터셉트)
-  void HandleEnable(const base::Value::List* patterns,
+  void HandleEnable(const base::ListValue* patterns,
                     McpSession* session,
                     base::OnceCallback<void(base::Value)> callback);
 
@@ -128,7 +133,7 @@ class NetworkInterceptTool : public McpTool {
 
   // action=addRule: 자동 처리 규칙을 rules_ 맵에 등록.
   // ruleId가 없으면 자동 생성한다.
-  void HandleAddRule(const base::Value::Dict& arguments,
+  void HandleAddRule(const base::DictValue& arguments,
                      base::OnceCallback<void(base::Value)> callback);
 
   // action=removeRule: ruleId에 해당하는 규칙을 rules_ 맵에서 제거.
@@ -137,19 +142,19 @@ class NetworkInterceptTool : public McpTool {
 
   // action=continueRequest: 일시 정지된 요청을 수정하여 계속 진행.
   // Fetch.continueRequest CDP 명령 호출.
-  void HandleContinueRequest(const base::Value::Dict& arguments,
+  void HandleContinueRequest(const base::DictValue& arguments,
                              McpSession* session,
                              base::OnceCallback<void(base::Value)> callback);
 
   // action=fulfillRequest: 일시 정지된 요청에 커스텀 응답 반환.
   // Fetch.fulfillRequest CDP 명령 호출.
-  void HandleFulfillRequest(const base::Value::Dict& arguments,
+  void HandleFulfillRequest(const base::DictValue& arguments,
                             McpSession* session,
                             base::OnceCallback<void(base::Value)> callback);
 
   // action=failRequest: 일시 정지된 요청을 에러로 종료.
   // Fetch.failRequest CDP 명령 호출.
-  void HandleFailRequest(const base::Value::Dict& arguments,
+  void HandleFailRequest(const base::DictValue& arguments,
                          McpSession* session,
                          base::OnceCallback<void(base::Value)> callback);
 
@@ -183,14 +188,14 @@ class NetworkInterceptTool : public McpTool {
   // Fetch.requestPaused 이벤트 수신 시 호출되는 핸들러.
   // 등록된 규칙 매칭 → 자동 처리 / 매칭 없으면 continueRequest 통과.
   void OnRequestPaused(const std::string& event_name,
-                       const base::Value::Dict& params,
+                       const base::DictValue& params,
                        McpSession* session);
 
   // 인터셉트된 요청에 규칙의 continue 동작 적용.
   // override 필드가 있으면 수정하여, 없으면 원본 그대로 통과.
   void ApplyRuleContinue(const std::string& request_id,
                          const InterceptRule& rule,
-                         const base::Value::Dict& paused_params,
+                         const base::DictValue& paused_params,
                          McpSession* session);
 
   // 인터셉트된 요청에 규칙의 fulfill 동작 적용.
@@ -222,11 +227,11 @@ class NetworkInterceptTool : public McpTool {
   static bool MatchesResourceType(const std::string& resource_type,
                                   const std::string& filter);
 
-  // base::Value::Dict 헤더를 Fetch.continueRequest/fulfillRequest 형식의
+  // base::DictValue 헤더를 Fetch.continueRequest/fulfillRequest 형식의
   // headerEntries 배열로 변환.
   // Fetch API는 헤더를 [{name:"...", value:"..."}] 배열 형식으로 받는다.
-  static base::Value::List HeaderDictToEntries(
-      const base::Value::Dict& headers);
+  static base::ListValue HeaderDictToEntries(
+      const base::DictValue& headers);
 
   // 오류 응답 구조체 생성 헬퍼.
   static base::Value MakeErrorResult(const std::string& message);

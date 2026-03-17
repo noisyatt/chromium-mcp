@@ -11,6 +11,7 @@
 
 #include <string>
 
+#include "base/containers/span.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/posix/eintr_wrapper.h"
@@ -123,18 +124,16 @@ void McpTransportSocket::Send(const std::string& json_message) {
     return;
   }
 
-  const char* data = framed.data();
-  const size_t total = framed.size();
-  size_t written = 0;
-
   // 부분 쓰기 처리를 위해 반복 쓰기
-  while (written < total) {
-    ssize_t result = HANDLE_EINTR(write(fd, data + written, total - written));
+  base::span<const char> remaining(framed);
+  while (!remaining.empty()) {
+    ssize_t result =
+        HANDLE_EINTR(write(fd, remaining.data(), remaining.size()));
     if (result < 0) {
       LOG(ERROR) << "[MCP] 소켓 쓰기 실패: errno=" << errno;
       return;
     }
-    written += static_cast<size_t>(result);
+    remaining = remaining.subspan(static_cast<size_t>(result));
   }
 }
 
@@ -164,7 +163,7 @@ bool McpTransportSocket::CreateAndBindSocket() {
     LOG(ERROR) << "[MCP] 소켓 경로가 너무 김: " << socket_path_;
     return false;
   }
-  strncpy(addr.sun_path, socket_path_.c_str(), sizeof(addr.sun_path) - 1);
+  base::strlcpy(addr.sun_path, socket_path_.c_str(), sizeof(addr.sun_path));
 
   // 소켓 파일에 바인딩
   if (bind(fd, reinterpret_cast<const struct sockaddr*>(&addr),
@@ -331,11 +330,11 @@ bool McpTransportSocket::ReadExactBytes(int fd,
                                         size_t n,
                                         std::string* out) const {
   out->resize(n);
-  char* buf = &(*out)[0];
-  size_t total_read = 0;
+  base::span<char> remaining(base::as_writable_chars(base::span(*out)));
 
-  while (total_read < n) {
-    ssize_t result = HANDLE_EINTR(read(fd, buf + total_read, n - total_read));
+  while (!remaining.empty()) {
+    ssize_t result =
+        HANDLE_EINTR(read(fd, remaining.data(), remaining.size()));
     if (result == 0) {
       return false;  // EOF
     }
@@ -343,7 +342,7 @@ bool McpTransportSocket::ReadExactBytes(int fd,
       LOG(ERROR) << "[MCP] 소켓 read() 실패: errno=" << errno;
       return false;
     }
-    total_read += static_cast<size_t>(result);
+    remaining = remaining.subspan(static_cast<size_t>(result));
   }
 
   return true;

@@ -20,9 +20,9 @@ namespace {
 // MCP 성공 응답 Value를 생성한다.
 // content 배열에 type=text 항목 하나를 포함하는 표준 MCP 형식.
 base::Value MakeSuccessResult(const std::string& message) {
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue item;
   item.Set("type", "text");
   item.Set("text", message);
   content.Append(std::move(item));
@@ -33,9 +33,9 @@ base::Value MakeSuccessResult(const std::string& message) {
 
 // MCP 에러 응답 Value를 생성한다.
 base::Value MakeErrorResult(const std::string& message) {
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue item;
   item.Set("type", "text");
   item.Set("text", message);
   content.Append(std::move(item));
@@ -46,7 +46,7 @@ base::Value MakeErrorResult(const std::string& message) {
 
 // CDP 응답 Dict에 "error" 키가 있는지 확인한다.
 bool HasCdpError(const base::Value& response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     return true;
   }
@@ -55,11 +55,11 @@ bool HasCdpError(const base::Value& response) {
 
 // CDP 응답에서 에러 메시지 문자열을 추출한다.
 std::string ExtractCdpErrorMessage(const base::Value& response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     return "CDP 응답이 Dict 형식이 아님";
   }
-  const base::Value::Dict* error = dict->FindDict("error");
+  const base::DictValue* error = dict->FindDict("error");
   if (!error) {
     return "알 수 없는 CDP 에러";
   }
@@ -72,11 +72,11 @@ std::string ExtractCdpErrorMessage(const base::Value& response) {
 
 // CDP 응답 result.nodeId 값을 추출한다. 없으면 -1 반환.
 int ExtractNodeId(const base::Value& response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     return -1;
   }
-  const base::Value::Dict* result = dict->FindDict("result");
+  const base::DictValue* result = dict->FindDict("result");
   if (!result) {
     return -1;
   }
@@ -90,20 +90,20 @@ int ExtractNodeId(const base::Value& response) {
 bool ExtractBoxModelCenter(const base::Value& response,
                            double* out_x,
                            double* out_y) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     return false;
   }
-  const base::Value::Dict* result = dict->FindDict("result");
+  const base::DictValue* result = dict->FindDict("result");
   if (!result) {
     return false;
   }
-  const base::Value::Dict* model = result->FindDict("model");
+  const base::DictValue* model = result->FindDict("model");
   if (!model) {
     return false;
   }
   // "content" 키: 요소의 content-box 꼭짓점 좌표 배열
-  const base::Value::List* content = model->FindList("content");
+  const base::ListValue* content = model->FindList("content");
   if (!content || content->size() < 8) {
     return false;
   }
@@ -122,7 +122,7 @@ bool ExtractBoxModelCenter(const base::Value& response,
 // Input.dispatchMouseEvent 파라미터 Dict를 생성한다.
 // type: "mousePressed" 또는 "mouseReleased"
 // button: "left", "right", "middle"
-base::Value::Dict MakeMouseEventParams(const std::string& type,
+base::DictValue MakeMouseEventParams(const std::string& type,
                                        double x,
                                        double y,
                                        const std::string& button) {
@@ -134,7 +134,7 @@ base::Value::Dict MakeMouseEventParams(const std::string& type,
     button_index = 2;
   }
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("type", type);
   params.Set("x", x);
   params.Set("y", y);
@@ -164,29 +164,29 @@ std::string ClickTool::description() const {
          "waitForNavigation으로 페이지 이동 완료를 기다릴 수 있습니다.";
 }
 
-base::Value::Dict ClickTool::input_schema() const {
+base::DictValue ClickTool::input_schema() const {
   // JSON Schema (draft-07 형식)
-  base::Value::Dict schema;
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // selector: CSS 셀렉터 문자열
-  base::Value::Dict selector_prop;
+  base::DictValue selector_prop;
   selector_prop.Set("type", "string");
   selector_prop.Set("description", "클릭할 요소의 CSS 셀렉터 (예: \"#submit\", \".btn\")");
   properties.Set("selector", std::move(selector_prop));
 
   // ref: 접근성 트리 ref (selector와 둘 중 하나 사용)
-  base::Value::Dict ref_prop;
+  base::DictValue ref_prop;
   ref_prop.Set("type", "string");
   ref_prop.Set("description", "접근성 스냅샷에서 얻은 요소 ref");
   properties.Set("ref", std::move(ref_prop));
 
   // button: 마우스 버튼 종류
-  base::Value::Dict button_prop;
+  base::DictValue button_prop;
   button_prop.Set("type", "string");
-  base::Value::List button_enum;
+  base::ListValue button_enum;
   button_enum.Append("left");
   button_enum.Append("right");
   button_enum.Append("middle");
@@ -196,7 +196,7 @@ base::Value::Dict ClickTool::input_schema() const {
   properties.Set("button", std::move(button_prop));
 
   // waitForNavigation: 클릭 후 페이지 이동 대기 여부
-  base::Value::Dict wait_prop;
+  base::DictValue wait_prop;
   wait_prop.Set("type", "boolean");
   wait_prop.Set("default", false);
   wait_prop.Set("description", "true이면 Page.loadEventFired 이벤트까지 대기");
@@ -206,13 +206,13 @@ base::Value::Dict ClickTool::input_schema() const {
 
   // selector와 ref 중 하나는 필수
   // (런타임에서 검증하므로 required 배열은 빈 채로 둠)
-  base::Value::List required;
+  base::ListValue required;
   schema.Set("required", std::move(required));
 
   return schema;
 }
 
-void ClickTool::Execute(const base::Value::Dict& arguments,
+void ClickTool::Execute(const base::DictValue& arguments,
                         McpSession* session,
                         base::OnceCallback<void(base::Value)> callback) {
   // selector / ref 중 하나 필수
@@ -258,7 +258,7 @@ void ClickTool::GetDocumentRoot(
     bool wait_for_navigation,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("depth", 0);  // 루트만 필요
 
   session->SendCdpCommand(
@@ -282,9 +282,9 @@ void ClickTool::OnGetDocumentRoot(
   }
 
   // result.root.nodeId 추출
-  const base::Value::Dict* dict = response.GetIfDict();
-  const base::Value::Dict* result = dict ? dict->FindDict("result") : nullptr;
-  const base::Value::Dict* root = result ? result->FindDict("root") : nullptr;
+  const base::DictValue* dict = response.GetIfDict();
+  const base::DictValue* result = dict ? dict->FindDict("result") : nullptr;
+  const base::DictValue* root = result ? result->FindDict("root") : nullptr;
   std::optional<int> root_node_id = root ? root->FindInt("nodeId") : std::nullopt;
 
   if (!root_node_id.has_value() || *root_node_id <= 0) {
@@ -293,7 +293,7 @@ void ClickTool::OnGetDocumentRoot(
     return;
   }
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("nodeId", *root_node_id);
   params.Set("selector", selector);
 
@@ -323,7 +323,7 @@ void ClickTool::OnQuerySelector(
     return;
   }
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("nodeId", node_id);
 
   session->SendCdpCommand(
@@ -407,7 +407,7 @@ void ClickTool::OnMouseReleased(
   LOG(INFO) << "[ClickTool] 페이지 로드 이벤트 대기 중...";
   session->SendCdpCommand(
       "Page.loadEventFired",
-      base::Value::Dict(),
+      base::DictValue(),
       base::BindOnce(&ClickTool::OnLoadEventFired,
                      weak_factory_.GetWeakPtr(),
                      std::move(callback)));
@@ -452,23 +452,23 @@ std::string FillTool::description() const {
          "텍스트 값을 입력합니다. 기존 내용은 자동으로 삭제됩니다.";
 }
 
-base::Value::Dict FillTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue FillTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
-  base::Value::Dict selector_prop;
+  base::DictValue selector_prop;
   selector_prop.Set("type", "string");
   selector_prop.Set("description", "입력 필드의 CSS 셀렉터 (예: \"input[name='q']\")");
   properties.Set("selector", std::move(selector_prop));
 
-  base::Value::Dict ref_prop;
+  base::DictValue ref_prop;
   ref_prop.Set("type", "string");
   ref_prop.Set("description", "접근성 스냅샷에서 얻은 요소 ref");
   properties.Set("ref", std::move(ref_prop));
 
-  base::Value::Dict value_prop;
+  base::DictValue value_prop;
   value_prop.Set("type", "string");
   value_prop.Set("description", "입력할 텍스트 값");
   properties.Set("value", std::move(value_prop));
@@ -476,14 +476,14 @@ base::Value::Dict FillTool::input_schema() const {
   schema.Set("properties", std::move(properties));
 
   // value는 필수
-  base::Value::List required;
+  base::ListValue required;
   required.Append("value");
   schema.Set("required", std::move(required));
 
   return schema;
 }
 
-void FillTool::Execute(const base::Value::Dict& arguments,
+void FillTool::Execute(const base::DictValue& arguments,
                        McpSession* session,
                        base::OnceCallback<void(base::Value)> callback) {
   const std::string* selector = arguments.FindString("selector");
@@ -519,7 +519,7 @@ void FillTool::GetDocumentRoot(
     const std::string& value,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("depth", 0);
 
   session->SendCdpCommand(
@@ -540,9 +540,9 @@ void FillTool::OnGetDocumentRoot(
     return;
   }
 
-  const base::Value::Dict* dict = response.GetIfDict();
-  const base::Value::Dict* result = dict ? dict->FindDict("result") : nullptr;
-  const base::Value::Dict* root = result ? result->FindDict("root") : nullptr;
+  const base::DictValue* dict = response.GetIfDict();
+  const base::DictValue* result = dict ? dict->FindDict("result") : nullptr;
+  const base::DictValue* root = result ? result->FindDict("root") : nullptr;
   std::optional<int> root_node_id = root ? root->FindInt("nodeId") : std::nullopt;
 
   if (!root_node_id.has_value() || *root_node_id <= 0) {
@@ -551,7 +551,7 @@ void FillTool::OnGetDocumentRoot(
     return;
   }
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("nodeId", *root_node_id);
   params.Set("selector", selector);
 
@@ -579,7 +579,7 @@ void FillTool::OnQuerySelector(
     return;
   }
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("nodeId", node_id);
 
   session->SendCdpCommand(
@@ -601,7 +601,7 @@ void FillTool::OnFocused(
 
   // Ctrl+A: 기존 텍스트 전체 선택
   // modifiers: 2 = Control (CDP 규격)
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("type", "keyDown");
   params.Set("key", "a");
   params.Set("code", "KeyA");
@@ -625,7 +625,7 @@ void FillTool::OnSelectAllKeyDown(
     return;
   }
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("type", "keyUp");
   params.Set("key", "a");
   params.Set("code", "KeyA");
@@ -650,7 +650,7 @@ void FillTool::OnSelectAllKeyUp(
   }
 
   // Delete 키 → 선택된 텍스트 삭제
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("type", "keyDown");
   params.Set("key", "Delete");
   params.Set("code", "Delete");
@@ -677,7 +677,7 @@ void FillTool::OnDeleteKey(
   // Input.insertText: 현재 포커스된 입력창에 텍스트를 한 번에 삽입.
   // dispatchKeyEvent를 문자마다 반복하는 방식보다 효율적이며,
   // 한글·이모지 등 멀티바이트 문자도 안전하게 처리된다.
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("text", value);
 
   session->SendCdpCommand(

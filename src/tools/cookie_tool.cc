@@ -19,9 +19,9 @@ namespace {
 
 // MCP 성공 응답 Value 생성.
 base::Value MakeSuccessResult(const std::string& text) {
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue item;
   item.Set("type", "text");
   item.Set("text", text);
   content.Append(std::move(item));
@@ -32,9 +32,9 @@ base::Value MakeSuccessResult(const std::string& text) {
 
 // MCP 에러 응답 Value 생성.
 base::Value MakeErrorResult(const std::string& text) {
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue item;
   item.Set("type", "text");
   item.Set("text", text);
   content.Append(std::move(item));
@@ -45,8 +45,8 @@ base::Value MakeErrorResult(const std::string& text) {
 
 // CDP 응답에서 에러 메시지를 추출한다.
 // 에러가 없으면 빈 문자열 반환.
-std::string ExtractCdpError(const base::Value::Dict& dict) {
-  const base::Value::Dict* error = dict.FindDict("error");
+std::string ExtractCdpError(const base::DictValue& dict) {
+  const base::DictValue* error = dict.FindDict("error");
   if (!error) {
     return "";
   }
@@ -71,17 +71,17 @@ std::string CookieTool::description() const {
          "action=clear로 브라우저의 모든 쿠키를 삭제합니다.";
 }
 
-base::Value::Dict CookieTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue CookieTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // action: 필수 파라미터
   {
-    base::Value::Dict action_prop;
+    base::DictValue action_prop;
     action_prop.Set("type", "string");
-    base::Value::List action_enum;
+    base::ListValue action_enum;
     action_enum.Append("get");
     action_enum.Append("set");
     action_enum.Append("delete");
@@ -95,7 +95,7 @@ base::Value::Dict CookieTool::input_schema() const {
 
   // url: 쿠키 대상 URL (get/delete 시 범위 지정에 사용)
   {
-    base::Value::Dict url_prop;
+    base::DictValue url_prop;
     url_prop.Set("type", "string");
     url_prop.Set("description",
                  "쿠키 대상 URL. get 시 해당 URL에 적용되는 쿠키만 반환. "
@@ -105,7 +105,7 @@ base::Value::Dict CookieTool::input_schema() const {
 
   // name: 쿠키 이름 (set/delete 시 필수)
   {
-    base::Value::Dict name_prop;
+    base::DictValue name_prop;
     name_prop.Set("type", "string");
     name_prop.Set("description", "쿠키 이름. set/delete 시 필수.");
     properties.Set("name", std::move(name_prop));
@@ -113,7 +113,7 @@ base::Value::Dict CookieTool::input_schema() const {
 
   // value: 쿠키 값 (set 시 필수)
   {
-    base::Value::Dict value_prop;
+    base::DictValue value_prop;
     value_prop.Set("type", "string");
     value_prop.Set("description", "쿠키 값. set 시 필수.");
     properties.Set("value", std::move(value_prop));
@@ -121,7 +121,7 @@ base::Value::Dict CookieTool::input_schema() const {
 
   // domain: 쿠키 도메인 (set 시 사용)
   {
-    base::Value::Dict domain_prop;
+    base::DictValue domain_prop;
     domain_prop.Set("type", "string");
     domain_prop.Set("description",
                     "쿠키 도메인. set 시 설정. 예: \".example.com\"");
@@ -130,7 +130,7 @@ base::Value::Dict CookieTool::input_schema() const {
 
   // path: 쿠키 경로 (기본값: "/")
   {
-    base::Value::Dict path_prop;
+    base::DictValue path_prop;
     path_prop.Set("type", "string");
     path_prop.Set("description", "쿠키 경로. 기본값: \"/\"");
     properties.Set("path", std::move(path_prop));
@@ -138,7 +138,7 @@ base::Value::Dict CookieTool::input_schema() const {
 
   // secure: Secure 플래그
   {
-    base::Value::Dict secure_prop;
+    base::DictValue secure_prop;
     secure_prop.Set("type", "boolean");
     secure_prop.Set("description",
                     "true이면 HTTPS 연결에서만 전송되는 Secure 쿠키로 설정.");
@@ -147,7 +147,7 @@ base::Value::Dict CookieTool::input_schema() const {
 
   // httpOnly: HttpOnly 플래그
   {
-    base::Value::Dict http_only_prop;
+    base::DictValue http_only_prop;
     http_only_prop.Set("type", "boolean");
     http_only_prop.Set("description",
                        "true이면 JavaScript에서 접근 불가한 HttpOnly 쿠키로 설정.");
@@ -156,9 +156,9 @@ base::Value::Dict CookieTool::input_schema() const {
 
   // sameSite: SameSite 정책
   {
-    base::Value::Dict same_site_prop;
+    base::DictValue same_site_prop;
     same_site_prop.Set("type", "string");
-    base::Value::List same_site_enum;
+    base::ListValue same_site_enum;
     same_site_enum.Append("Strict");
     same_site_enum.Append("Lax");
     same_site_enum.Append("None");
@@ -171,7 +171,7 @@ base::Value::Dict CookieTool::input_schema() const {
   // expirationDate: 만료 시간 (Unix timestamp, 초 단위)
   // Network.setCookie의 expires 필드에 매핑된다.
   {
-    base::Value::Dict expires_prop;
+    base::DictValue expires_prop;
     expires_prop.Set("type", "number");
     expires_prop.Set("description",
                      "쿠키 만료 시간 (Unix timestamp, 초 단위). "
@@ -182,7 +182,7 @@ base::Value::Dict CookieTool::input_schema() const {
   schema.Set("properties", std::move(properties));
 
   // action만 필수
-  base::Value::List required;
+  base::ListValue required;
   required.Append("action");
   schema.Set("required", std::move(required));
 
@@ -190,7 +190,7 @@ base::Value::Dict CookieTool::input_schema() const {
 }
 
 void CookieTool::Execute(
-    const base::Value::Dict& arguments,
+    const base::DictValue& arguments,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   const std::string* action = arguments.FindString("action");
@@ -226,11 +226,11 @@ void CookieTool::HandleGet(
     const std::string& url,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
-  base::Value::Dict params;
+  base::DictValue params;
 
   if (!url.empty()) {
     // urls 배열에 대상 URL을 추가하면 해당 URL에 적용되는 쿠키만 반환된다.
-    base::Value::List urls;
+    base::ListValue urls;
     urls.Append(url);
     params.Set("urls", std::move(urls));
     LOG(INFO) << "[CookieTool] Network.getCookies url=" << url;
@@ -248,7 +248,7 @@ void CookieTool::HandleGet(
 // action=set: Network.setCookie 호출.
 // name과 value는 필수. 나머지는 선택적으로 설정.
 void CookieTool::HandleSet(
-    const base::Value::Dict& arguments,
+    const base::DictValue& arguments,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   const std::string* name = arguments.FindString("name");
@@ -263,7 +263,7 @@ void CookieTool::HandleSet(
     return;
   }
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("name", *name);
   params.Set("value", *value);
 
@@ -322,7 +322,7 @@ void CookieTool::HandleSet(
 // action=delete: Network.deleteCookies 호출.
 // name은 필수. url 또는 domain으로 범위를 지정한다.
 void CookieTool::HandleDelete(
-    const base::Value::Dict& arguments,
+    const base::DictValue& arguments,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   const std::string* name = arguments.FindString("name");
@@ -332,7 +332,7 @@ void CookieTool::HandleDelete(
     return;
   }
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("name", *name);
 
   // url 또는 domain으로 범위 지정 (선택적)
@@ -367,7 +367,7 @@ void CookieTool::HandleClear(
   LOG(INFO) << "[CookieTool] Network.clearBrowserCookies";
 
   session->SendCdpCommand(
-      "Network.clearBrowserCookies", base::Value::Dict(),
+      "Network.clearBrowserCookies", base::DictValue(),
       base::BindOnce(&CookieTool::OnSimpleCommandResponse,
                      weak_factory_.GetWeakPtr(),
                      "모든 쿠키가 삭제되었습니다.",
@@ -379,7 +379,7 @@ void CookieTool::HandleClear(
 void CookieTool::OnGetCookiesResponse(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     std::move(callback).Run(MakeErrorResult("Network.getCookies 응답 형식 오류"));
     return;
@@ -394,8 +394,8 @@ void CookieTool::OnGetCookiesResponse(
   }
 
   // result.cookies 배열 추출
-  const base::Value::Dict* result = dict->FindDict("result");
-  const base::Value::List* cookies =
+  const base::DictValue* result = dict->FindDict("result");
+  const base::ListValue* cookies =
       result ? result->FindList("cookies") : nullptr;
 
   if (!cookies) {
@@ -420,7 +420,7 @@ void CookieTool::OnGetCookiesResponse(
 void CookieTool::OnSetCookieResponse(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     std::move(callback).Run(MakeErrorResult("Network.setCookie 응답 형식 오류"));
     return;
@@ -435,7 +435,7 @@ void CookieTool::OnSetCookieResponse(
   }
 
   // result.success 필드 확인
-  const base::Value::Dict* result = dict->FindDict("result");
+  const base::DictValue* result = dict->FindDict("result");
   std::optional<bool> success =
       result ? result->FindBool("success") : std::nullopt;
 
@@ -458,7 +458,7 @@ void CookieTool::OnSimpleCommandResponse(
     const std::string& success_message,
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (dict) {
     std::string cdp_error = ExtractCdpError(*dict);
     if (!cdp_error.empty()) {

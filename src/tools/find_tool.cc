@@ -16,6 +16,9 @@ namespace mcp {
 FindTool::FindTool() = default;
 FindTool::~FindTool() = default;
 
+FindTool::SearchContext::SearchContext() = default;
+FindTool::SearchContext::~SearchContext() = default;
+
 std::string FindTool::name() const {
   return "find";
 }
@@ -24,17 +27,17 @@ std::string FindTool::description() const {
   return "페이지에서 텍스트 또는 CSS 선택자로 요소 검색";
 }
 
-base::Value::Dict FindTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue FindTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict props;
+  base::DictValue props;
 
   // type: 검색 유형 (필수)
   {
-    base::Value::Dict p;
+    base::DictValue p;
     p.Set("type", "string");
-    base::Value::List e;
+    base::ListValue e;
     e.Append("text");
     e.Append("selector");
     e.Append("xpath");
@@ -49,7 +52,7 @@ base::Value::Dict FindTool::input_schema() const {
 
   // query: 검색어 (필수)
   {
-    base::Value::Dict p;
+    base::DictValue p;
     p.Set("type", "string");
     p.Set("description",
           "검색어. type 에 따라 의미가 다름:\n"
@@ -61,7 +64,7 @@ base::Value::Dict FindTool::input_schema() const {
 
   // limit: 최대 결과 수 (기본 10)
   {
-    base::Value::Dict p;
+    base::DictValue p;
     p.Set("type", "number");
     p.Set("description", "반환할 최대 결과 수 (기본값: 10)");
     p.Set("default", 10);
@@ -70,7 +73,7 @@ base::Value::Dict FindTool::input_schema() const {
 
   // includeText: 요소의 innerText 포함 여부 (기본 true)
   {
-    base::Value::Dict p;
+    base::DictValue p;
     p.Set("type", "boolean");
     p.Set("description",
           "각 결과 항목에 innerText 를 포함할지 여부 (기본값: true)");
@@ -80,7 +83,7 @@ base::Value::Dict FindTool::input_schema() const {
 
   // includeAttributes: HTML 속성 포함 여부 (기본 false)
   {
-    base::Value::Dict p;
+    base::DictValue p;
     p.Set("type", "boolean");
     p.Set("description",
           "각 결과 항목에 HTML 속성 목록을 포함할지 여부 (기본값: false)");
@@ -91,7 +94,7 @@ base::Value::Dict FindTool::input_schema() const {
   schema.Set("properties", std::move(props));
 
   // type, query 는 필수
-  base::Value::List required;
+  base::ListValue required;
   required.Append("type");
   required.Append("query");
   schema.Set("required", std::move(required));
@@ -102,27 +105,27 @@ base::Value::Dict FindTool::input_schema() const {
 // -----------------------------------------------------------------------
 // Execute
 // -----------------------------------------------------------------------
-void FindTool::Execute(const base::Value::Dict& arguments,
+void FindTool::Execute(const base::DictValue& arguments,
                         McpSession* session,
                         base::OnceCallback<void(base::Value)> callback) {
   const std::string* type_ptr = arguments.FindString("type");
   const std::string* query_ptr = arguments.FindString("query");
 
   if (!type_ptr || type_ptr->empty()) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "type 파라미터가 필요합니다 (text/selector/xpath)");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
   }
   if (!query_ptr || query_ptr->empty()) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "query 파라미터가 필요합니다");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
   }
 
   if (*type_ptr != "text" && *type_ptr != "selector" && *type_ptr != "xpath") {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error",
             "type 은 'text', 'selector', 'xpath' 중 하나여야 합니다");
     std::move(callback).Run(base::Value(std::move(err)));
@@ -163,7 +166,7 @@ void FindTool::Execute(const base::Value::Dict& arguments,
 // text / xpath: DOM.performSearch
 // -----------------------------------------------------------------------
 void FindTool::DoPerformSearch(std::shared_ptr<SearchContext> ctx) {
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("query", ctx->query);
   // includeUserAgentShadowDOM: 기본 false
   params.Set("includeUserAgentShadowDOM", false);
@@ -178,7 +181,7 @@ void FindTool::DoPerformSearch(std::shared_ptr<SearchContext> ctx) {
 // selector: DOM.getDocument → DOM.querySelectorAll
 // -----------------------------------------------------------------------
 void FindTool::DoSelectorSearch(std::shared_ptr<SearchContext> ctx) {
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("depth", 0);
   params.Set("pierce", false);
 
@@ -194,30 +197,30 @@ void FindTool::DoSelectorSearch(std::shared_ptr<SearchContext> ctx) {
 void FindTool::OnPerformSearch(std::shared_ptr<SearchContext> ctx,
                                 base::Value response) {
   if (!response.is_dict()) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "DOM.performSearch: 응답 형식 오류");
     std::move(ctx->callback).Run(base::Value(std::move(err)));
     return;
   }
 
-  const base::Value::Dict& d = response.GetDict();
+  const base::DictValue& d = response.GetDict();
   std::string cdp_err = ExtractCdpError(d);
   if (!cdp_err.empty()) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "DOM.performSearch 실패: " + cdp_err);
     std::move(ctx->callback).Run(base::Value(std::move(err)));
     return;
   }
 
   // searchId, resultCount 추출
-  const base::Value::Dict* r = d.FindDict("result");
-  const base::Value::Dict* data = r ? r : &d;
+  const base::DictValue* r = d.FindDict("result");
+  const base::DictValue* data = r ? r : &d;
 
   const std::string* sid = data->FindString("searchId");
   std::optional<int> cnt = data->FindInt("resultCount");
 
   if (!sid || !cnt) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "DOM.performSearch: searchId 또는 resultCount 없음");
     std::move(ctx->callback).Run(base::Value(std::move(err)));
     return;
@@ -231,12 +234,12 @@ void FindTool::OnPerformSearch(std::shared_ptr<SearchContext> ctx,
 
   if (ctx->result_count == 0) {
     // 결과 없음
-    base::Value::Dict out;
+    base::DictValue out;
     out.Set("success", true);
     out.Set("query",   ctx->query);
     out.Set("type",    ctx->type);
     out.Set("total",   0);
-    out.Set("items",   base::Value::List());
+    out.Set("items",   base::ListValue());
     std::move(ctx->callback).Run(base::Value(std::move(out)));
     return;
   }
@@ -244,7 +247,7 @@ void FindTool::OnPerformSearch(std::shared_ptr<SearchContext> ctx,
   // 실제 가져올 결과 수는 limit 와 resultCount 중 작은 값
   int fetch_count = std::min(ctx->result_count, ctx->limit);
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("searchId",  ctx->search_id);
   params.Set("fromIndex", 0);
   params.Set("toIndex",   fetch_count);
@@ -261,24 +264,24 @@ void FindTool::OnPerformSearch(std::shared_ptr<SearchContext> ctx,
 void FindTool::OnGetSearchResults(std::shared_ptr<SearchContext> ctx,
                                    base::Value response) {
   if (!response.is_dict()) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "DOM.getSearchResults: 응답 형식 오류");
     std::move(ctx->callback).Run(base::Value(std::move(err)));
     return;
   }
 
-  const base::Value::Dict& d = response.GetDict();
+  const base::DictValue& d = response.GetDict();
   std::string cdp_err = ExtractCdpError(d);
   if (!cdp_err.empty()) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "DOM.getSearchResults 실패: " + cdp_err);
     std::move(ctx->callback).Run(base::Value(std::move(err)));
     return;
   }
 
   // nodeIds 배열 추출
-  const base::Value::List* ids = nullptr;
-  if (const base::Value::Dict* r = d.FindDict("result")) {
+  const base::ListValue* ids = nullptr;
+  if (const base::DictValue* r = d.FindDict("result")) {
     ids = r->FindList("nodeIds");
   }
   if (!ids) {
@@ -286,12 +289,12 @@ void FindTool::OnGetSearchResults(std::shared_ptr<SearchContext> ctx,
   }
 
   if (!ids || ids->empty()) {
-    base::Value::Dict out;
+    base::DictValue out;
     out.Set("success", true);
     out.Set("query",   ctx->query);
     out.Set("type",    ctx->type);
     out.Set("total",   ctx->result_count);
-    out.Set("items",   base::Value::List());
+    out.Set("items",   base::ListValue());
     std::move(ctx->callback).Run(base::Value(std::move(out)));
     return;
   }
@@ -311,24 +314,24 @@ void FindTool::OnGetSearchResults(std::shared_ptr<SearchContext> ctx,
 void FindTool::OnGetDocumentForSelector(std::shared_ptr<SearchContext> ctx,
                                          base::Value response) {
   if (!response.is_dict()) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "DOM.getDocument: 응답 형식 오류");
     std::move(ctx->callback).Run(base::Value(std::move(err)));
     return;
   }
 
-  const base::Value::Dict& d = response.GetDict();
+  const base::DictValue& d = response.GetDict();
   std::string cdp_err = ExtractCdpError(d);
   if (!cdp_err.empty()) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "DOM.getDocument 실패: " + cdp_err);
     std::move(ctx->callback).Run(base::Value(std::move(err)));
     return;
   }
 
   // 루트 nodeId 추출
-  const base::Value::Dict* root = nullptr;
-  if (const base::Value::Dict* r = d.FindDict("result")) {
+  const base::DictValue* root = nullptr;
+  if (const base::DictValue* r = d.FindDict("result")) {
     root = r->FindDict("root");
   }
   if (!root) {
@@ -337,13 +340,13 @@ void FindTool::OnGetDocumentForSelector(std::shared_ptr<SearchContext> ctx,
 
   std::optional<int> root_id = root ? root->FindInt("nodeId") : std::nullopt;
   if (!root_id) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "DOM.getDocument: 루트 nodeId 추출 실패");
     std::move(ctx->callback).Run(base::Value(std::move(err)));
     return;
   }
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("nodeId",   *root_id);
   params.Set("selector", ctx->query);
 
@@ -359,24 +362,24 @@ void FindTool::OnGetDocumentForSelector(std::shared_ptr<SearchContext> ctx,
 void FindTool::OnQuerySelectorAll(std::shared_ptr<SearchContext> ctx,
                                    base::Value response) {
   if (!response.is_dict()) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "DOM.querySelectorAll: 응답 형식 오류");
     std::move(ctx->callback).Run(base::Value(std::move(err)));
     return;
   }
 
-  const base::Value::Dict& d = response.GetDict();
+  const base::DictValue& d = response.GetDict();
   std::string cdp_err = ExtractCdpError(d);
   if (!cdp_err.empty()) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "DOM.querySelectorAll 실패: " + cdp_err);
     std::move(ctx->callback).Run(base::Value(std::move(err)));
     return;
   }
 
   // nodeIds 배열 추출
-  const base::Value::List* ids = nullptr;
-  if (const base::Value::Dict* r = d.FindDict("result")) {
+  const base::ListValue* ids = nullptr;
+  if (const base::DictValue* r = d.FindDict("result")) {
     ids = r->FindList("nodeIds");
   }
   if (!ids) {
@@ -384,12 +387,12 @@ void FindTool::OnQuerySelectorAll(std::shared_ptr<SearchContext> ctx,
   }
 
   if (!ids || ids->empty()) {
-    base::Value::Dict out;
+    base::DictValue out;
     out.Set("success", true);
     out.Set("query",   ctx->query);
     out.Set("type",    ctx->type);
     out.Set("total",   0);
-    out.Set("items",   base::Value::List());
+    out.Set("items",   base::ListValue());
     std::move(ctx->callback).Run(base::Value(std::move(out)));
     return;
   }
@@ -411,12 +414,12 @@ void FindTool::OnQuerySelectorAll(std::shared_ptr<SearchContext> ctx,
 // -----------------------------------------------------------------------
 void FindTool::DescribeNodes(std::shared_ptr<SearchContext> ctx) {
   if (ctx->node_ids.empty()) {
-    base::Value::Dict out;
+    base::DictValue out;
     out.Set("success", true);
     out.Set("query",   ctx->query);
     out.Set("type",    ctx->type);
     out.Set("total",   ctx->result_count);
-    out.Set("items",   base::Value::List());
+    out.Set("items",   base::ListValue());
     std::move(ctx->callback).Run(base::Value(std::move(out)));
     return;
   }
@@ -424,13 +427,13 @@ void FindTool::DescribeNodes(std::shared_ptr<SearchContext> ctx) {
   // 결과 배열을 미리 nodeId 수만큼 예약 (순서 보장을 위해 인덱스 사용)
   ctx->items.reserve(ctx->node_ids.size());
   for (size_t i = 0; i < ctx->node_ids.size(); ++i) {
-    ctx->items.Append(base::Value::Dict());  // 빈 슬롯
+    ctx->items.Append(base::DictValue());  // 빈 슬롯
   }
 
   ctx->pending_describe = static_cast<int>(ctx->node_ids.size());
 
   for (size_t i = 0; i < ctx->node_ids.size(); ++i) {
-    base::Value::Dict params;
+    base::DictValue params;
     params.Set("nodeId", ctx->node_ids[i]);
     params.Set("depth",  0);
 
@@ -447,15 +450,15 @@ void FindTool::DescribeNodes(std::shared_ptr<SearchContext> ctx) {
 void FindTool::OnDescribeNode(std::shared_ptr<SearchContext> ctx,
                                size_t index,
                                base::Value response) {
-  base::Value::Dict item;
+  base::DictValue item;
   item.Set("nodeId", ctx->node_ids[index]);
 
   if (response.is_dict()) {
-    const base::Value::Dict& d = response.GetDict();
+    const base::DictValue& d = response.GetDict();
 
     // node 객체 추출
-    const base::Value::Dict* node = nullptr;
-    if (const base::Value::Dict* r = d.FindDict("result")) {
+    const base::DictValue* node = nullptr;
+    if (const base::DictValue* r = d.FindDict("result")) {
       node = r->FindDict("node");
     }
     if (!node) {
@@ -472,10 +475,10 @@ void FindTool::OnDescribeNode(std::shared_ptr<SearchContext> ctx,
       }
 
       // HTML 속성 파싱 (includeAttributes 또는 id/className 추출 목적)
-      if (const base::Value::List* attrs = node->FindList("attributes")) {
+      if (const base::ListValue* attrs = node->FindList("attributes")) {
         // id, className 은 항상 추출 (식별 목적)
         std::string id_val, class_val;
-        base::Value::Dict attrs_dict;
+        base::DictValue attrs_dict;
 
         for (size_t i = 0; i + 1 < attrs->size(); i += 2) {
           const auto& k = (*attrs)[i];
@@ -525,7 +528,7 @@ void FindTool::OnDescribeNode(std::shared_ptr<SearchContext> ctx,
 
   ctx->finalized = true;
 
-  base::Value::Dict out;
+  base::DictValue out;
   out.Set("success", true);
   out.Set("query",   ctx->query);
   out.Set("type",    ctx->type);
@@ -543,8 +546,8 @@ void FindTool::OnDescribeNode(std::shared_ptr<SearchContext> ctx,
 // 정적 헬퍼
 // -----------------------------------------------------------------------
 // static
-std::string FindTool::ExtractCdpError(const base::Value::Dict& d) {
-  const base::Value::Dict* err = d.FindDict("error");
+std::string FindTool::ExtractCdpError(const base::DictValue& d) {
+  const base::DictValue* err = d.FindDict("error");
   if (!err) return {};
   const std::string* msg = err->FindString("message");
   return msg ? *msg : "CDP 오류 (메시지 없음)";

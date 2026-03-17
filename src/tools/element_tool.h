@@ -37,8 +37,8 @@ class ElementTool : public McpTool {
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
-  void Execute(const base::Value::Dict& arguments,
+  base::DictValue input_schema() const override;
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 
@@ -46,6 +46,8 @@ class ElementTool : public McpTool {
   // 한 번의 Execute 호출에 필요한 모든 상태를 담는 컨텍스트.
   // 비동기 CDP 호출 간에 shared_ptr로 공유된다.
   struct QueryContext {
+    QueryContext();
+    ~QueryContext();
     // 입력 파라미터
     std::string selector;
     std::set<std::string> requested_properties;  // 빈 집합 = 전체 조회
@@ -60,7 +62,7 @@ class ElementTool : public McpTool {
     bool finalized = false;    // 최종 콜백이 이미 호출되었는지 여부
 
     // 누적 결과
-    base::Value::Dict result;
+    base::DictValue result;
 
     // 소유권 없는 포인터 (McpSession의 수명이 더 길다고 가정)
     McpSession* session = nullptr;
@@ -102,7 +104,7 @@ class ElementTool : public McpTool {
   void OnOneRequestDone(std::shared_ptr<QueryContext> ctx);
 
   // CDP 응답에서 오류 메시지를 추출한다. 오류가 없으면 빈 문자열 반환.
-  static std::string ExtractCdpError(const base::Value::Dict& response_dict);
+  static std::string ExtractCdpError(const base::DictValue& response_dict);
 
   base::WeakPtrFactory<ElementTool> weak_factory_{this};
 };

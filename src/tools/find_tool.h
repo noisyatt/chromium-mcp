@@ -36,14 +36,16 @@ class FindTool : public McpTool {
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
-  void Execute(const base::Value::Dict& arguments,
+  base::DictValue input_schema() const override;
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 
  private:
   // 한 번의 Execute 호출에 필요한 모든 상태
   struct SearchContext {
+    SearchContext();
+    ~SearchContext();
     // 입력 파라미터
     std::string type;    // "text" | "selector" | "xpath"
     std::string query;
@@ -57,7 +59,7 @@ class FindTool : public McpTool {
     std::vector<int> node_ids;      // 검색된 nodeId 목록
 
     // 수집 중인 결과
-    base::Value::List items;         // 최종 결과 배열
+    base::ListValue items;         // 최종 결과 배열
 
     // 비동기 완료 추적
     int pending_describe = 0;        // 아직 완료되지 않은 describeNode 요청 수
@@ -110,7 +112,7 @@ class FindTool : public McpTool {
   // -----------------------------------------------------------------------
 
   // CDP 오류 메시지 추출 (없으면 빈 문자열)
-  static std::string ExtractCdpError(const base::Value::Dict& d);
+  static std::string ExtractCdpError(const base::DictValue& d);
 
   base::WeakPtrFactory<FindTool> weak_factory_{this};
 };

@@ -36,8 +36,8 @@ class DialogTool : public McpTool {
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
-  void Execute(const base::Value::Dict& arguments,
+  base::DictValue input_schema() const override;
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 
@@ -50,12 +50,12 @@ class DialogTool : public McpTool {
   // current_dialog_에 저장한다. autoHandle 모드가 활성화된 경우
   // 즉시 autoAction에 따라 Page.handleJavaScriptDialog를 호출한다.
   void OnJavaScriptDialogOpening(const std::string& event_name,
-                                 const base::Value::Dict& params);
+                                 const base::DictValue& params);
 
   // Page.javascriptDialogClosed 이벤트 핸들러.
   // 다이얼로그가 닫히면 current_dialog_를 초기화한다.
   void OnJavaScriptDialogClosed(const std::string& event_name,
-                                const base::Value::Dict& params);
+                                const base::DictValue& params);
 
   // Page.handleJavaScriptDialog CDP 응답 처리.
   void OnHandleDialogResponse(base::OnceCallback<void(base::Value)> callback,
@@ -63,6 +63,10 @@ class DialogTool : public McpTool {
 
   // 현재 열린 다이얼로그 정보 구조체
   struct DialogInfo {
+    DialogInfo();
+    ~DialogInfo();
+    DialogInfo(DialogInfo&&);
+    DialogInfo& operator=(DialogInfo&&);
     std::string type;            // "alert", "confirm", "prompt", "beforeunload"
     std::string message;         // 다이얼로그 메시지 본문
     std::string url;             // 다이얼로그를 트리거한 페이지 URL

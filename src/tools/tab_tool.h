@@ -11,6 +11,10 @@
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_tool_registry.h"
 
+namespace content {
+class WebContents;
+}  // namespace content
+
 namespace mcp {
 
 // TabsTool: 브라우저 탭을 관리하는 MCP 도구.
@@ -40,8 +44,8 @@ class TabsTool : public McpTool {
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
-  void Execute(const base::Value::Dict& arguments,
+  base::DictValue input_schema() const override;
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 
@@ -72,10 +76,10 @@ class TabsTool : public McpTool {
   // content::WebContents::GetPrimaryMainFrame()의 process/routing ID 조합.
   static int GetTabId(content::WebContents* web_contents);
 
-  // 단일 탭 정보를 base::Value::Dict으로 직렬화.
+  // 단일 탭 정보를 base::DictValue으로 직렬화.
   // |tab_index|: TabStripModel 내 인덱스
   // |is_active|: 현재 활성 탭 여부
-  static base::Value::Dict SerializeTab(content::WebContents* web_contents,
+  static base::DictValue SerializeTab(content::WebContents* web_contents,
                                         int tab_index,
                                         bool is_active);
 

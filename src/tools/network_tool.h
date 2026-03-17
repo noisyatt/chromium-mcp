@@ -18,6 +18,11 @@ namespace mcp {
 // Network.requestWillBeSent, Network.responseReceived,
 // Network.loadingFinished 이벤트를 통해 채워진다.
 struct CapturedRequest {
+  CapturedRequest();
+  ~CapturedRequest();
+  CapturedRequest(CapturedRequest&&);
+  CapturedRequest& operator=(CapturedRequest&&);
+
   // requestWillBeSent에서 채워지는 필드
   std::string request_id;
   std::string url;
@@ -29,7 +34,7 @@ struct CapturedRequest {
   int status_code = 0;
   std::string status_text;
   std::string mime_type;
-  base::Value::Dict response_headers;
+  base::DictValue response_headers;
 
   // loadingFinished에서 채워지는 필드
   double encoded_data_length = 0.0;
@@ -65,8 +70,8 @@ class NetworkCaptureTool : public McpTool {
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
-  void Execute(const base::Value::Dict& arguments,
+  base::DictValue input_schema() const override;
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 
@@ -75,7 +80,7 @@ class NetworkCaptureTool : public McpTool {
   // |include_response_body|: 응답 바디 자동 수집 여부
   // |filter|: URL 패턴 / 리소스 타입 필터 (현재 세션에 저장)
   void HandleStart(bool include_response_body,
-                   const base::Value::Dict* filter,
+                   const base::DictValue* filter,
                    McpSession* session,
                    base::OnceCallback<void(base::Value)> callback);
 
@@ -97,20 +102,20 @@ class NetworkCaptureTool : public McpTool {
   // CDP 이벤트 수신 시 호출되는 내부 핸들러.
   // McpSession이 이벤트를 전달하기 위해 사용한다.
   void OnCdpEvent(const std::string& event_name,
-                  const base::Value::Dict& event_params);
+                  const base::DictValue& event_params);
 
   // Network.requestWillBeSent 이벤트 처리.
   // 새 CapturedRequest를 생성하여 버퍼에 추가한다.
-  void OnRequestWillBeSent(const base::Value::Dict& params);
+  void OnRequestWillBeSent(const base::DictValue& params);
 
   // Network.responseReceived 이벤트 처리.
   // 버퍼에서 해당 requestId 항목을 찾아 응답 정보를 업데이트한다.
-  void OnResponseReceived(const base::Value::Dict& params);
+  void OnResponseReceived(const base::DictValue& params);
 
   // Network.loadingFinished 이벤트 처리.
   // 전송 완료된 바이트 수를 기록하고, includeResponseBody=true 이면
   // Network.getResponseBody CDP 명령을 비동기 호출한다.
-  void OnLoadingFinished(const base::Value::Dict& params,
+  void OnLoadingFinished(const base::DictValue& params,
                          McpSession* session);
 
   // Network.getResponseBody CDP 응답 처리.
@@ -172,8 +177,8 @@ class NetworkRequestsTool : public McpTool {
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
-  void Execute(const base::Value::Dict& arguments,
+  base::DictValue input_schema() const override;
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 

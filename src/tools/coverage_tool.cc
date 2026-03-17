@@ -34,17 +34,17 @@ std::string CoverageTool::description() const {
          "사용/미사용 CSS 규칙과 JS 함수/블록 실행 여부를 추적한다.";
 }
 
-base::Value::Dict CoverageTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue CoverageTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // action
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "string");
-    base::Value::List enums;
+    base::ListValue enums;
     enums.Append("startCSS");
     enums.Append("stopCSS");
     enums.Append("startJS");
@@ -59,7 +59,7 @@ base::Value::Dict CoverageTool::input_schema() const {
 
   // detailed: 세부 범위 포함 여부
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "boolean");
     prop.Set("description",
              "세부 범위 포함 여부 (기본값: false). "
@@ -70,19 +70,19 @@ base::Value::Dict CoverageTool::input_schema() const {
 
   schema.Set("properties", std::move(properties));
 
-  base::Value::List required;
+  base::ListValue required;
   required.Append("action");
   schema.Set("required", std::move(required));
 
   return schema;
 }
 
-void CoverageTool::Execute(const base::Value::Dict& arguments,
+void CoverageTool::Execute(const base::DictValue& arguments,
                             McpSession* session,
                             base::OnceCallback<void(base::Value)> callback) {
   const std::string* action_ptr = arguments.FindString("action");
   if (!action_ptr) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "action 파라미터가 필요합니다");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
@@ -104,7 +104,7 @@ void CoverageTool::Execute(const base::Value::Dict& arguments,
   } else if (action == "stopJS") {
     ExecuteStopJS(detailed, session, std::move(callback));
   } else {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "알 수 없는 action: " + action);
     std::move(callback).Run(base::Value(std::move(err)));
   }
@@ -118,7 +118,7 @@ void CoverageTool::ExecuteStartCSS(
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   if (css_tracking_) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error", "CSS 추적이 이미 진행 중입니다. stopCSS를 먼저 호출하세요.");
     std::move(callback).Run(base::Value(std::move(result)));
@@ -129,7 +129,7 @@ void CoverageTool::ExecuteStartCSS(
 
   // 1단계: CSS.enable → CSS 도메인 활성화
   session->SendCdpCommand(
-      "CSS.enable", base::Value::Dict(),
+      "CSS.enable", base::DictValue(),
       base::BindOnce(&CoverageTool::OnCssEnabled,
                      weak_factory_.GetWeakPtr(), session,
                      std::move(callback)));
@@ -140,10 +140,10 @@ void CoverageTool::OnCssEnabled(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
   if (response.is_dict()) {
-    const base::Value::Dict* err = response.GetDict().FindDict("error");
+    const base::DictValue* err = response.GetDict().FindDict("error");
     if (err) {
       const std::string* msg = err->FindString("message");
-      base::Value::Dict result;
+      base::DictValue result;
       result.Set("success", false);
       result.Set("error", msg ? *msg : "CSS.enable 실패");
       std::move(callback).Run(base::Value(std::move(result)));
@@ -155,7 +155,7 @@ void CoverageTool::OnCssEnabled(
 
   // 2단계: CSS.startRuleUsageTracking → 규칙 사용 추적 시작
   session->SendCdpCommand(
-      "CSS.startRuleUsageTracking", base::Value::Dict(),
+      "CSS.startRuleUsageTracking", base::DictValue(),
       base::BindOnce(&CoverageTool::OnCssTrackingStarted,
                      weak_factory_.GetWeakPtr(), std::move(callback)));
 }
@@ -164,10 +164,10 @@ void CoverageTool::OnCssTrackingStarted(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
   if (response.is_dict()) {
-    const base::Value::Dict* err = response.GetDict().FindDict("error");
+    const base::DictValue* err = response.GetDict().FindDict("error");
     if (err) {
       const std::string* msg = err->FindString("message");
-      base::Value::Dict result;
+      base::DictValue result;
       result.Set("success", false);
       result.Set("error", msg ? *msg : "CSS.startRuleUsageTracking 실패");
       std::move(callback).Run(base::Value(std::move(result)));
@@ -178,7 +178,7 @@ void CoverageTool::OnCssTrackingStarted(
   css_tracking_ = true;
   LOG(INFO) << "[CoverageTool] CSS 규칙 추적 시작됨";
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success", true);
   result.Set("message",
              "CSS 커버리지 추적을 시작했습니다. "
@@ -195,7 +195,7 @@ void CoverageTool::ExecuteStopCSS(
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   if (!css_tracking_) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error",
                "CSS 추적이 시작되지 않았습니다. startCSS를 먼저 호출하세요.");
@@ -209,7 +209,7 @@ void CoverageTool::ExecuteStopCSS(
   // 반환 형식:
   //   ruleUsage: [{styleSheetId, startOffset, endOffset, used}]
   session->SendCdpCommand(
-      "CSS.stopRuleUsageTracking", base::Value::Dict(),
+      "CSS.stopRuleUsageTracking", base::DictValue(),
       base::BindOnce(&CoverageTool::OnCssTrackingStopped,
                      weak_factory_.GetWeakPtr(), detailed, session,
                      std::move(callback)));
@@ -224,42 +224,42 @@ void CoverageTool::OnCssTrackingStopped(
 
   // CSS.disable 호출 (정리, 결과와 무관하게 실행)
   session->SendCdpCommand(
-      "CSS.disable", base::Value::Dict(),
+      "CSS.disable", base::DictValue(),
       base::BindOnce(&CoverageTool::OnCssDisabled,
                      weak_factory_.GetWeakPtr()));
 
   if (!response.is_dict()) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("error", "예상치 못한 CDP 응답 형식");
     std::move(callback).Run(base::Value(std::move(result)));
     return;
   }
 
-  const base::Value::Dict& dict = response.GetDict();
-  const base::Value::Dict* err = dict.FindDict("error");
+  const base::DictValue& dict = response.GetDict();
+  const base::DictValue* err = dict.FindDict("error");
   if (err) {
     const std::string* msg = err->FindString("message");
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("error", msg ? *msg : "CSS.stopRuleUsageTracking 실패");
     std::move(callback).Run(base::Value(std::move(result)));
     return;
   }
 
   // result.ruleUsage 추출
-  const base::Value::Dict* res = dict.FindDict("result");
+  const base::DictValue* res = dict.FindDict("result");
   if (!res) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("error", "CSS.stopRuleUsageTracking 응답에서 result를 찾을 수 없음");
     std::move(callback).Run(base::Value(std::move(result)));
     return;
   }
 
-  const base::Value::List* rule_usage = res->FindList("ruleUsage");
+  const base::ListValue* rule_usage = res->FindList("ruleUsage");
   if (!rule_usage) {
     // ruleUsage가 없으면 빈 결과 반환
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", true);
-    result.Set("summary", AggregateCssUsage(base::Value::List(), detailed));
+    result.Set("summary", AggregateCssUsage(base::ListValue(), detailed));
     std::move(callback).Run(base::Value(std::move(result)));
     return;
   }
@@ -267,9 +267,9 @@ void CoverageTool::OnCssTrackingStopped(
   LOG(INFO) << "[CoverageTool] CSS 커버리지 수집 완료: "
             << rule_usage->size() << "개 규칙";
 
-  base::Value::Dict aggregate = AggregateCssUsage(*rule_usage, detailed);
+  base::DictValue aggregate = AggregateCssUsage(*rule_usage, detailed);
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success", true);
   result.Set("summary", std::move(aggregate));
   std::move(callback).Run(base::Value(std::move(result)));
@@ -278,7 +278,7 @@ void CoverageTool::OnCssTrackingStopped(
 void CoverageTool::OnCssDisabled(base::Value response) {
   // CSS.disable 응답은 정리 목적으로만 사용. 결과는 이미 반환됨.
   if (response.is_dict()) {
-    const base::Value::Dict* err = response.GetDict().FindDict("error");
+    const base::DictValue* err = response.GetDict().FindDict("error");
     if (err) {
       LOG(WARNING) << "[CoverageTool] CSS.disable 경고 (무시)";
     }
@@ -294,7 +294,7 @@ void CoverageTool::ExecuteStartJS(
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   if (js_tracking_) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error", "JS 커버리지가 이미 진행 중입니다. stopJS를 먼저 호출하세요.");
     std::move(callback).Run(base::Value(std::move(result)));
@@ -305,7 +305,7 @@ void CoverageTool::ExecuteStartJS(
 
   // 1단계: Profiler.enable → Profiler 도메인 활성화
   session->SendCdpCommand(
-      "Profiler.enable", base::Value::Dict(),
+      "Profiler.enable", base::DictValue(),
       base::BindOnce(&CoverageTool::OnProfilerEnabled,
                      weak_factory_.GetWeakPtr(), detailed, session,
                      std::move(callback)));
@@ -317,10 +317,10 @@ void CoverageTool::OnProfilerEnabled(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
   if (response.is_dict()) {
-    const base::Value::Dict* err = response.GetDict().FindDict("error");
+    const base::DictValue* err = response.GetDict().FindDict("error");
     if (err) {
       const std::string* msg = err->FindString("message");
-      base::Value::Dict result;
+      base::DictValue result;
       result.Set("success", false);
       result.Set("error", msg ? *msg : "Profiler.enable 실패");
       std::move(callback).Run(base::Value(std::move(result)));
@@ -334,7 +334,7 @@ void CoverageTool::OnProfilerEnabled(
   // 2단계: Profiler.startPreciseCoverage
   //   callCount=true: 함수 호출 횟수 추적
   //   detailed=true: 블록(if/else/for 등) 단위 세부 범위 포함
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("callCount", true);
   params.Set("detailed", detailed);
 
@@ -348,10 +348,10 @@ void CoverageTool::OnJsCoverageStarted(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
   if (response.is_dict()) {
-    const base::Value::Dict* err = response.GetDict().FindDict("error");
+    const base::DictValue* err = response.GetDict().FindDict("error");
     if (err) {
       const std::string* msg = err->FindString("message");
-      base::Value::Dict result;
+      base::DictValue result;
       result.Set("success", false);
       result.Set("error", msg ? *msg : "Profiler.startPreciseCoverage 실패");
       std::move(callback).Run(base::Value(std::move(result)));
@@ -362,7 +362,7 @@ void CoverageTool::OnJsCoverageStarted(
   js_tracking_ = true;
   LOG(INFO) << "[CoverageTool] JS 정밀 커버리지 측정 시작됨";
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success", true);
   result.Set("message",
              "JS 커버리지 측정을 시작했습니다. "
@@ -379,7 +379,7 @@ void CoverageTool::ExecuteStopJS(
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   if (!js_tracking_) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error",
                "JS 커버리지가 시작되지 않았습니다. startJS를 먼저 호출하세요.");
@@ -396,7 +396,7 @@ void CoverageTool::ExecuteStopJS(
   //     timestamp: number
   //   }
   session->SendCdpCommand(
-      "Profiler.takePreciseCoverage", base::Value::Dict(),
+      "Profiler.takePreciseCoverage", base::DictValue(),
       base::BindOnce(&CoverageTool::OnJsCoverageTaken,
                      weak_factory_.GetWeakPtr(), detailed, session,
                      std::move(callback)));
@@ -411,41 +411,41 @@ void CoverageTool::OnJsCoverageTaken(
 
   // 정리: Profiler.stopPreciseCoverage → Profiler.disable
   session->SendCdpCommand(
-      "Profiler.stopPreciseCoverage", base::Value::Dict(),
+      "Profiler.stopPreciseCoverage", base::DictValue(),
       base::BindOnce(&CoverageTool::OnJsCoverageStopped,
                      weak_factory_.GetWeakPtr()));
 
   if (!response.is_dict()) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("error", "예상치 못한 CDP 응답 형식");
     std::move(callback).Run(base::Value(std::move(result)));
     return;
   }
 
-  const base::Value::Dict& dict = response.GetDict();
-  const base::Value::Dict* err = dict.FindDict("error");
+  const base::DictValue& dict = response.GetDict();
+  const base::DictValue* err = dict.FindDict("error");
   if (err) {
     const std::string* msg = err->FindString("message");
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("error", msg ? *msg : "Profiler.takePreciseCoverage 실패");
     std::move(callback).Run(base::Value(std::move(result)));
     return;
   }
 
   // result.result (ScriptCoverage 배열) 추출
-  const base::Value::Dict* outer_result = dict.FindDict("result");
+  const base::DictValue* outer_result = dict.FindDict("result");
   if (!outer_result) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("error", "takePreciseCoverage 응답에서 result를 찾을 수 없음");
     std::move(callback).Run(base::Value(std::move(result)));
     return;
   }
 
-  const base::Value::List* script_coverage = outer_result->FindList("result");
+  const base::ListValue* script_coverage = outer_result->FindList("result");
   if (!script_coverage) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", true);
-    result.Set("summary", AggregateJsUsage(base::Value::List(), detailed));
+    result.Set("summary", AggregateJsUsage(base::ListValue(), detailed));
     std::move(callback).Run(base::Value(std::move(result)));
     return;
   }
@@ -453,9 +453,9 @@ void CoverageTool::OnJsCoverageTaken(
   LOG(INFO) << "[CoverageTool] JS 커버리지 수집 완료: "
             << script_coverage->size() << "개 스크립트";
 
-  base::Value::Dict aggregate = AggregateJsUsage(*script_coverage, detailed);
+  base::DictValue aggregate = AggregateJsUsage(*script_coverage, detailed);
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success", true);
   result.Set("summary", std::move(aggregate));
   std::move(callback).Run(base::Value(std::move(result)));
@@ -468,7 +468,7 @@ void CoverageTool::OnJsCoverageStopped(base::Value response) {
 
 void CoverageTool::OnProfilerDisabled(base::Value response) {
   if (response.is_dict()) {
-    const base::Value::Dict* err = response.GetDict().FindDict("error");
+    const base::DictValue* err = response.GetDict().FindDict("error");
     if (err) {
       LOG(WARNING) << "[CoverageTool] Profiler.disable 경고 (무시)";
     }
@@ -480,8 +480,8 @@ void CoverageTool::OnProfilerDisabled(base::Value response) {
 // -----------------------------------------------------------------------
 
 // static
-base::Value::Dict CoverageTool::AggregateCssUsage(
-    const base::Value::List& rule_usage,
+base::DictValue CoverageTool::AggregateCssUsage(
+    const base::ListValue& rule_usage,
     bool detailed) {
   // ruleUsage 항목: {styleSheetId, startOffset, endOffset, used}
   int total_rules = 0;
@@ -494,7 +494,7 @@ base::Value::Dict CoverageTool::AggregateCssUsage(
 
   for (const auto& item : rule_usage) {
     if (!item.is_dict()) continue;
-    const base::Value::Dict& rule = item.GetDict();
+    const base::DictValue& rule = item.GetDict();
 
     std::optional<bool> used_opt = rule.FindBool("used");
     bool used = used_opt.value_or(false);
@@ -514,17 +514,17 @@ base::Value::Dict CoverageTool::AggregateCssUsage(
       ? (static_cast<double>(used_rules) / total_rules) * 100.0
       : 0.0;
 
-  base::Value::Dict summary;
+  base::DictValue summary;
   summary.Set("totalRules",   total_rules);
   summary.Set("usedRules",    used_rules);
   summary.Set("unusedRules",  unused_rules);
   summary.Set("usagePercent", std::round(usage_percent * 100.0) / 100.0);
 
   // 미사용 규칙이 있는 스타일시트 목록
-  base::Value::List unused_sheets;
+  base::ListValue unused_sheets;
   for (const auto& [sheet_id, counts] : sheet_stats) {
     if (counts.second > 0) {  // unused > 0
-      base::Value::Dict sheet_info;
+      base::DictValue sheet_info;
       sheet_info.Set("styleSheetId", sheet_id);
       sheet_info.Set("usedRules",   counts.first);
       sheet_info.Set("unusedRules", counts.second);
@@ -546,8 +546,8 @@ base::Value::Dict CoverageTool::AggregateCssUsage(
 // -----------------------------------------------------------------------
 
 // static
-base::Value::Dict CoverageTool::AggregateJsUsage(
-    const base::Value::List& script_coverage,
+base::DictValue CoverageTool::AggregateJsUsage(
+    const base::ListValue& script_coverage,
     bool detailed) {
   // ScriptCoverage 항목:
   //   scriptId: 스크립트 식별자
@@ -562,12 +562,12 @@ base::Value::Dict CoverageTool::AggregateJsUsage(
   int64_t total_bytes = 0;
   int64_t used_bytes  = 0;
 
-  base::Value::List script_summaries;
-  base::Value::List unused_urls;
+  base::ListValue script_summaries;
+  base::ListValue unused_urls;
 
   for (const auto& script_item : script_coverage) {
     if (!script_item.is_dict()) continue;
-    const base::Value::Dict& script = script_item.GetDict();
+    const base::DictValue& script = script_item.GetDict();
 
     const std::string* url_ptr = script.FindString("url");
     std::string url = url_ptr ? *url_ptr : "(anonymous)";
@@ -575,7 +575,7 @@ base::Value::Dict CoverageTool::AggregateJsUsage(
     // 내부 스크립트(빈 URL) 및 확장 스크립트 제외
     if (url.empty() || url.find("extensions://") != std::string::npos) continue;
 
-    const base::Value::List* functions = script.FindList("functions");
+    const base::ListValue* functions = script.FindList("functions");
     if (!functions) continue;
 
     int64_t script_total = 0;
@@ -585,17 +585,17 @@ base::Value::Dict CoverageTool::AggregateJsUsage(
 
     for (const auto& func_item : *functions) {
       if (!func_item.is_dict()) continue;
-      const base::Value::Dict& func = func_item.GetDict();
+      const base::DictValue& func = func_item.GetDict();
 
       ++total_funcs;
 
-      const base::Value::List* ranges = func.FindList("ranges");
+      const base::ListValue* ranges = func.FindList("ranges");
       if (!ranges) continue;
 
       bool func_called = false;
       for (const auto& range_item : *ranges) {
         if (!range_item.is_dict()) continue;
-        const base::Value::Dict& range = range_item.GetDict();
+        const base::DictValue& range = range_item.GetDict();
 
         std::optional<int> start = range.FindInt("startOffset");
         std::optional<int> end   = range.FindInt("endOffset");
@@ -625,7 +625,7 @@ base::Value::Dict CoverageTool::AggregateJsUsage(
         ? (static_cast<double>(script_used) / script_total) * 100.0
         : 0.0;
 
-    base::Value::Dict script_summary;
+    base::DictValue script_summary;
     script_summary.Set("url",            url);
     script_summary.Set("totalBytes",     static_cast<int>(script_total));
     script_summary.Set("usedBytes",      static_cast<int>(script_used));
@@ -650,7 +650,7 @@ base::Value::Dict CoverageTool::AggregateJsUsage(
       ? (static_cast<double>(used_bytes) / total_bytes) * 100.0
       : 0.0;
 
-  base::Value::Dict summary;
+  base::DictValue summary;
   summary.Set("totalBytes",    static_cast<int>(total_bytes));
   summary.Set("usedBytes",     static_cast<int>(used_bytes));
   summary.Set("unusedBytes",   static_cast<int>(unused_bytes));

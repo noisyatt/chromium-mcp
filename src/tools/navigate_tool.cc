@@ -23,23 +23,23 @@ std::string NavigateTool::description() const {
   return "URL로 이동하거나 뒤로/앞으로 탐색";
 }
 
-base::Value::Dict NavigateTool::input_schema() const {
+base::DictValue NavigateTool::input_schema() const {
   // JSON Schema 형식으로 입력 파라미터를 정의한다.
-  base::Value::Dict schema;
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // url: action이 "url"일 때 필수 파라미터
-  base::Value::Dict url_prop;
+  base::DictValue url_prop;
   url_prop.Set("type", "string");
   url_prop.Set("description", "이동할 대상 URL (action이 'url'일 때 필수)");
   properties.Set("url", std::move(url_prop));
 
   // action: 탐색 종류 (기본값 "url")
-  base::Value::Dict action_prop;
+  base::DictValue action_prop;
   action_prop.Set("type", "string");
-  base::Value::List action_enum;
+  base::ListValue action_enum;
   action_enum.Append("url");
   action_enum.Append("back");
   action_enum.Append("forward");
@@ -58,7 +58,7 @@ base::Value::Dict NavigateTool::input_schema() const {
   return schema;
 }
 
-void NavigateTool::Execute(const base::Value::Dict& arguments,
+void NavigateTool::Execute(const base::DictValue& arguments,
                            McpSession* session,
                            base::OnceCallback<void(base::Value)> callback) {
   // action 파라미터 추출 (없으면 기본값 "url" 사용)
@@ -69,17 +69,17 @@ void NavigateTool::Execute(const base::Value::Dict& arguments,
 
   if (action == "back") {
     // 뒤로 이동: Page.goBack
-    SendNavigationCommand("Page.goBack", base::Value::Dict(), session,
+    SendNavigationCommand("Page.goBack", base::DictValue(), session,
                           std::move(callback));
 
   } else if (action == "forward") {
     // 앞으로 이동: Page.goForward
-    SendNavigationCommand("Page.goForward", base::Value::Dict(), session,
+    SendNavigationCommand("Page.goForward", base::DictValue(), session,
                           std::move(callback));
 
   } else if (action == "reload") {
     // 새로고침: Page.reload (캐시 무시 안함)
-    base::Value::Dict params;
+    base::DictValue params;
     params.Set("ignoreCache", false);
     SendNavigationCommand("Page.reload", std::move(params), session,
                           std::move(callback));
@@ -89,14 +89,14 @@ void NavigateTool::Execute(const base::Value::Dict& arguments,
     const std::string* url_ptr = arguments.FindString("url");
     if (!url_ptr || url_ptr->empty()) {
       LOG(WARNING) << "[NavigateTool] action='url'인데 url 파라미터가 없음";
-      base::Value::Dict error;
+      base::DictValue error;
       error.Set("error", "url 파라미터가 필요합니다");
       std::move(callback).Run(base::Value(std::move(error)));
       return;
     }
 
     LOG(INFO) << "[NavigateTool] Page.navigate url=" << *url_ptr;
-    base::Value::Dict params;
+    base::DictValue params;
     params.Set("url", *url_ptr);
     SendNavigationCommand("Page.navigate", std::move(params), session,
                           std::move(callback));
@@ -105,7 +105,7 @@ void NavigateTool::Execute(const base::Value::Dict& arguments,
 
 void NavigateTool::SendNavigationCommand(
     const std::string& method,
-    base::Value::Dict params,
+    base::DictValue params,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   // CDP 명령 전송 후 응답을 OnNavigationCommandResponse에서 처리한다.
@@ -126,14 +126,14 @@ void NavigateTool::OnNavigationCommandResponse(
   // CDP 응답에 에러가 있는지 확인한다.
   // CDP 에러 응답 형식: {"error": {"code": -32601, "message": "..."}}
   if (response.is_dict()) {
-    const base::Value::Dict& dict = response.GetDict();
-    const base::Value::Dict* error_dict = dict.FindDict("error");
+    const base::DictValue& dict = response.GetDict();
+    const base::DictValue* error_dict = dict.FindDict("error");
     if (error_dict) {
       const std::string* msg = error_dict->FindString("message");
       std::string error_msg = msg ? *msg : "알 수 없는 CDP 오류";
       LOG(ERROR) << "[NavigateTool] CDP 오류: " << error_msg;
 
-      base::Value::Dict result;
+      base::DictValue result;
       result.Set("success", false);
       result.Set("error", error_msg);
       std::move(callback).Run(base::Value(std::move(result)));
@@ -142,7 +142,7 @@ void NavigateTool::OnNavigationCommandResponse(
 
     // 성공: frameId, loaderId 등을 포함한 응답 반환
     LOG(INFO) << "[NavigateTool] 네비게이션 명령 성공";
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", true);
 
     // Page.navigate 응답에서 frameId와 loaderId를 추출해 결과에 포함
@@ -161,7 +161,7 @@ void NavigateTool::OnNavigationCommandResponse(
 
   // 예상치 못한 응답 형식
   LOG(WARNING) << "[NavigateTool] 예상치 못한 CDP 응답 형식";
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success", true);  // 오류가 없으면 성공으로 간주
   std::move(callback).Run(base::Value(std::move(result)));
 }

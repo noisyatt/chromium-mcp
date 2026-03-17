@@ -24,8 +24,8 @@ class NavigateTool : public McpTool {
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
-  void Execute(const base::Value::Dict& arguments,
+  base::DictValue input_schema() const override;
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 
@@ -35,7 +35,7 @@ class NavigateTool : public McpTool {
   // |params|: CDP 파라미터
   // |callback|: 최종 결과 콜백
   void SendNavigationCommand(const std::string& method,
-                             base::Value::Dict params,
+                             base::DictValue params,
                              McpSession* session,
                              base::OnceCallback<void(base::Value)> callback);
 

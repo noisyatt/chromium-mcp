@@ -8,6 +8,7 @@
 
 #include <string>
 
+#include "base/containers/span.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -96,13 +97,11 @@ void McpTransportStdio::Send(const std::string& json_message) {
   // (여러 도구의 비동기 응답이 동시에 Send()를 호출할 수 있음)
   base::AutoLock guard(write_lock_);
 
-  size_t written = 0;
-  const char* data = framed.data();
-  const size_t total = framed.size();
-
   // 부분 쓰기(partial write)를 처리하기 위해 반복 쓰기
-  while (written < total) {
-    ssize_t result = write(STDOUT_FILENO, data + written, total - written);
+  base::span<const char> remaining(framed);
+  while (!remaining.empty()) {
+    ssize_t result =
+        write(STDOUT_FILENO, remaining.data(), remaining.size());
     if (result < 0) {
       if (errno == EINTR) {
         continue;  // 시그널에 의한 중단 → 재시도
@@ -110,7 +109,7 @@ void McpTransportStdio::Send(const std::string& json_message) {
       LOG(ERROR) << "[MCP] stdout 쓰기 실패: errno=" << errno;
       return;
     }
-    written += static_cast<size_t>(result);
+    remaining = remaining.subspan(static_cast<size_t>(result));
   }
 }
 
@@ -230,11 +229,10 @@ bool McpTransportStdio::ParseContentLengthHeader(
 
 bool McpTransportStdio::ReadExactBytes(size_t n, std::string* out) const {
   out->resize(n);
-  size_t total_read = 0;
-  char* buf = &(*out)[0];
+  base::span<char> remaining(*out);
 
-  while (total_read < n) {
-    ssize_t result = read(STDIN_FILENO, buf + total_read, n - total_read);
+  while (!remaining.empty()) {
+    ssize_t result = read(STDIN_FILENO, remaining.data(), remaining.size());
     if (result == 0) {
       // EOF
       return false;
@@ -246,7 +244,7 @@ bool McpTransportStdio::ReadExactBytes(size_t n, std::string* out) const {
       LOG(ERROR) << "[MCP] stdin 읽기 실패: errno=" << errno;
       return false;
     }
-    total_read += static_cast<size_t>(result);
+    remaining = remaining.subspan(static_cast<size_t>(result));
   }
 
   return true;

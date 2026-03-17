@@ -38,14 +38,14 @@ namespace mcp {
 //   components/history/core/browser/history_types.h
 class HistoryTool : public McpTool {
  public:
-  HistoryTool() = default;
-  ~HistoryTool() override = default;
+  HistoryTool();
+  ~HistoryTool() override;
 
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
-  void Execute(const base::Value::Dict& arguments,
+  base::DictValue input_schema() const override;
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 
@@ -98,8 +98,8 @@ class HistoryTool : public McpTool {
   // 변환 실패 시 base::Time() (null time) 반환.
   static base::Time ParseIsoTime(const std::string& iso);
 
-  // QueryResults 를 base::Value::List 로 직렬화한다.
-  static base::Value::List SerializeResults(
+  // QueryResults 를 base::ListValue 로 직렬화한다.
+  static base::ListValue SerializeResults(
       const history::QueryResults& results);
 
   // -----------------------------------------------------------------------

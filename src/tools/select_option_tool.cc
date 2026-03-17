@@ -19,9 +19,9 @@ namespace {
 
 // MCP 성공 응답 Value 생성
 base::Value MakeSuccessResult(const std::string& message) {
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue item;
   item.Set("type", "text");
   item.Set("text", message);
   content.Append(std::move(item));
@@ -32,9 +32,9 @@ base::Value MakeSuccessResult(const std::string& message) {
 
 // MCP 에러 응답 Value 생성
 base::Value MakeErrorResult(const std::string& message) {
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue item;
   item.Set("type", "text");
   item.Set("text", message);
   content.Append(std::move(item));
@@ -45,7 +45,7 @@ base::Value MakeErrorResult(const std::string& message) {
 
 // CDP 응답에 "error" 키가 있는지 확인한다.
 bool HasCdpError(const base::Value& response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     return true;
   }
@@ -54,11 +54,11 @@ bool HasCdpError(const base::Value& response) {
 
 // CDP 응답에서 에러 메시지를 추출한다.
 std::string ExtractCdpErrorMessage(const base::Value& response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     return "CDP 응답이 Dict 형식이 아님";
   }
-  const base::Value::Dict* error = dict->FindDict("error");
+  const base::DictValue* error = dict->FindDict("error");
   if (!error) {
     return "알 수 없는 CDP 에러";
   }
@@ -71,11 +71,11 @@ std::string ExtractCdpErrorMessage(const base::Value& response) {
 
 // Runtime.evaluate 결과에서 예외(exception)가 발생했는지 확인한다.
 bool HasJsException(const base::Value& response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     return false;
   }
-  const base::Value::Dict* result = dict->FindDict("result");
+  const base::DictValue* result = dict->FindDict("result");
   if (!result) {
     return false;
   }
@@ -85,15 +85,15 @@ bool HasJsException(const base::Value& response) {
 
 // Runtime.evaluate 결과에서 JS 예외 메시지를 추출한다.
 std::string ExtractJsExceptionMessage(const base::Value& response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     return "JS 예외 발생 (상세 정보 없음)";
   }
-  const base::Value::Dict* result = dict->FindDict("result");
+  const base::DictValue* result = dict->FindDict("result");
   if (!result) {
     return "JS 예외 발생 (상세 정보 없음)";
   }
-  const base::Value::Dict* exception_details = result->FindDict("exceptionDetails");
+  const base::DictValue* exception_details = result->FindDict("exceptionDetails");
   if (!exception_details) {
     return "JS 예외 발생 (상세 정보 없음)";
   }
@@ -124,35 +124,35 @@ std::string SelectOptionTool::description() const {
          "'change' 이벤트가 버블링되어 발생합니다.";
 }
 
-base::Value::Dict SelectOptionTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue SelectOptionTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // selector: select 요소의 CSS 셀렉터
-  base::Value::Dict selector_prop;
+  base::DictValue selector_prop;
   selector_prop.Set("type", "string");
   selector_prop.Set("description", "select 요소의 CSS 셀렉터 (예: \"select#country\", \"select[name='size']\")");
   properties.Set("selector", std::move(selector_prop));
 
   // value: 선택할 option의 value 속성
-  base::Value::Dict value_prop;
+  base::DictValue value_prop;
   value_prop.Set("type", "string");
   value_prop.Set("description", "선택할 option 요소의 value 속성값. value와 text 중 하나를 사용.");
   properties.Set("value", std::move(value_prop));
 
   // text: 선택할 option의 텍스트 내용
-  base::Value::Dict text_prop;
+  base::DictValue text_prop;
   text_prop.Set("type", "string");
   text_prop.Set("description",
                 "선택할 option 요소의 표시 텍스트. value 파라미터보다 우선순위가 낮음.");
   properties.Set("text", std::move(text_prop));
 
   // values: 다중 선택 시 value 배열
-  base::Value::Dict values_prop;
+  base::DictValue values_prop;
   values_prop.Set("type", "array");
-  base::Value::Dict values_items;
+  base::DictValue values_items;
   values_items.Set("type", "string");
   values_prop.Set("items", std::move(values_items));
   values_prop.Set("description",
@@ -162,14 +162,14 @@ base::Value::Dict SelectOptionTool::input_schema() const {
   schema.Set("properties", std::move(properties));
 
   // selector는 필수
-  base::Value::List required;
+  base::ListValue required;
   required.Append("selector");
   schema.Set("required", std::move(required));
 
   return schema;
 }
 
-void SelectOptionTool::Execute(const base::Value::Dict& arguments,
+void SelectOptionTool::Execute(const base::DictValue& arguments,
                                McpSession* session,
                                base::OnceCallback<void(base::Value)> callback) {
   const std::string* selector = arguments.FindString("selector");
@@ -181,7 +181,7 @@ void SelectOptionTool::Execute(const base::Value::Dict& arguments,
 
   const std::string* value = arguments.FindString("value");
   const std::string* text = arguments.FindString("text");
-  const base::Value::List* values_list = arguments.FindList("values");
+  const base::ListValue* values_list = arguments.FindList("values");
 
   // 실행할 JavaScript 코드 조합
   std::string js_code;
@@ -264,7 +264,7 @@ void SelectOptionTool::Execute(const base::Value::Dict& arguments,
   }
 
   // Runtime.evaluate로 JS 실행
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("expression", js_code);
   params.Set("returnByValue", true);
 
@@ -292,9 +292,9 @@ void SelectOptionTool::OnEvaluateComplete(
   }
 
   // 결과에서 반환 문자열 추출
-  const base::Value::Dict* dict = response.GetIfDict();
-  const base::Value::Dict* result = dict ? dict->FindDict("result") : nullptr;
-  const base::Value::Dict* value_obj = result ? result->FindDict("result") : nullptr;
+  const base::DictValue* dict = response.GetIfDict();
+  const base::DictValue* result = dict ? dict->FindDict("result") : nullptr;
+  const base::DictValue* value_obj = result ? result->FindDict("result") : nullptr;
   const std::string* return_val = value_obj ? value_obj->FindString("value") : nullptr;
 
   std::string message = return_val ? *return_val : "옵션 선택이 완료되었습니다.";

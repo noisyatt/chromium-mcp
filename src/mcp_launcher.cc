@@ -20,6 +20,7 @@
 #include "base/posix/eintr_wrapper.h"
 #include "base/process/process_handle.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "base/values.h"
 
@@ -250,7 +251,7 @@ bool McpLauncher::ReadLockFile(const base::FilePath& lock_path,
   }
 
   // JSON 파싱
-  auto parsed = base::JSONReader::ReadDict(contents);
+  auto parsed = base::JSONReader::ReadDict(contents, base::JSON_PARSE_RFC);
   if (!parsed) {
     VLOG(1) << "[MCP 런처] lock 파일 JSON 파싱 실패: " << lock_path;
     return false;
@@ -329,7 +330,7 @@ bool McpLauncher::IsSocketConnectable(const std::string& socket_path) {
     close(sock_fd);
     return false;
   }
-  strncpy(addr.sun_path, socket_path.c_str(), sizeof(addr.sun_path) - 1);
+  base::strlcpy(addr.sun_path, socket_path.c_str(), sizeof(addr.sun_path));
 
   // 연결 시도
   int ret = HANDLE_EINTR(connect(sock_fd,
@@ -346,7 +347,7 @@ bool McpLauncher::IsSocketConnectable(const std::string& socket_path) {
 
 bool McpLauncher::WriteLockFile() {
   // 현재 프로세스 정보를 JSON 딕셔너리로 구성
-  base::Value::Dict lock_data;
+  base::DictValue lock_data;
   lock_data.Set(kFieldPid, static_cast<int>(base::GetCurrentProcId()));
   lock_data.Set(kFieldSocket, socket_path_);
 
@@ -367,11 +368,7 @@ bool McpLauncher::WriteLockFile() {
   }
 
   // 파일 쓰기
-  int bytes_written = base::WriteFile(lock_file_path_,
-                                      json_content.c_str(),
-                                      json_content.size());
-  if (bytes_written < 0 ||
-      static_cast<size_t>(bytes_written) != json_content.size()) {
+  if (!base::WriteFile(lock_file_path_, json_content)) {
     PLOG(ERROR) << "[MCP 런처] lock 파일 쓰기 실패: " << lock_file_path_;
     return false;
   }

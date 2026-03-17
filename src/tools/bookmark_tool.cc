@@ -15,12 +15,19 @@
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/mcp/mcp_session.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_node.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
+#include "components/query_parser/query_parser.h"
+#include "components/bookmarks/browser/titled_url_match.h"
 #include "url/gurl.h"
 
 namespace mcp {
+
+BookmarkTool::BookmarkTool() = default;
+BookmarkTool::~BookmarkTool() = default;
 
 // -----------------------------------------------------------------------
 // McpTool 인터페이스 구현
@@ -34,17 +41,17 @@ std::string BookmarkTool::description() const {
   return "북마크 조회, 추가, 삭제, 검색";
 }
 
-base::Value::Dict BookmarkTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue BookmarkTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict props;
+  base::DictValue props;
 
   // action: 수행할 작업 (필수)
   {
-    base::Value::Dict p;
+    base::DictValue p;
     p.Set("type", "string");
-    base::Value::List e;
+    base::ListValue e;
     e.Append("list");
     e.Append("add");
     e.Append("remove");
@@ -63,7 +70,7 @@ base::Value::Dict BookmarkTool::input_schema() const {
 
   // url: 북마크할 URL (add 시 필수)
   {
-    base::Value::Dict p;
+    base::DictValue p;
     p.Set("type", "string");
     p.Set("description", "북마크할 URL (action=add 시 필수)");
     props.Set("url", std::move(p));
@@ -71,7 +78,7 @@ base::Value::Dict BookmarkTool::input_schema() const {
 
   // title: 북마크 제목 (add 시 사용)
   {
-    base::Value::Dict p;
+    base::DictValue p;
     p.Set("type", "string");
     p.Set("description", "북마크 제목 (action=add 시 사용; 생략 시 URL로 대체)");
     props.Set("title", std::move(p));
@@ -79,7 +86,7 @@ base::Value::Dict BookmarkTool::input_schema() const {
 
   // folderId: 부모 폴더 ID (list/add 시 사용)
   {
-    base::Value::Dict p;
+    base::DictValue p;
     p.Set("type", "string");
     p.Set("description",
           "부모 폴더 ID (action=list/add 시 사용; 생략 시 북마크 바 루트)");
@@ -88,7 +95,7 @@ base::Value::Dict BookmarkTool::input_schema() const {
 
   // query: 검색어 (search 시 필수)
   {
-    base::Value::Dict p;
+    base::DictValue p;
     p.Set("type", "string");
     p.Set("description", "검색 키워드 (action=search 시 필수; 제목/URL에서 부분 일치)");
     props.Set("query", std::move(p));
@@ -96,7 +103,7 @@ base::Value::Dict BookmarkTool::input_schema() const {
 
   // bookmarkId: 북마크 ID (remove/move 시 필수)
   {
-    base::Value::Dict p;
+    base::DictValue p;
     p.Set("type", "string");
     p.Set("description", "북마크 ID (action=remove/move 시 필수)");
     props.Set("bookmarkId", std::move(p));
@@ -104,7 +111,7 @@ base::Value::Dict BookmarkTool::input_schema() const {
 
   // destinationFolderId: 이동 목적지 폴더 ID (move 시 필수)
   {
-    base::Value::Dict p;
+    base::DictValue p;
     p.Set("type", "string");
     p.Set("description", "이동 목적지 폴더 ID (action=move 시 필수)");
     props.Set("destinationFolderId", std::move(p));
@@ -112,7 +119,7 @@ base::Value::Dict BookmarkTool::input_schema() const {
 
   schema.Set("properties", std::move(props));
 
-  base::Value::List required;
+  base::ListValue required;
   required.Append("action");
   schema.Set("required", std::move(required));
 
@@ -122,12 +129,12 @@ base::Value::Dict BookmarkTool::input_schema() const {
 // -----------------------------------------------------------------------
 // Execute
 // -----------------------------------------------------------------------
-void BookmarkTool::Execute(const base::Value::Dict& arguments,
+void BookmarkTool::Execute(const base::DictValue& arguments,
                             McpSession* session,
                             base::OnceCallback<void(base::Value)> callback) {
   const std::string* action_ptr = arguments.FindString("action");
   if (!action_ptr) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "action 파라미터가 필요합니다");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
@@ -138,7 +145,7 @@ void BookmarkTool::Execute(const base::Value::Dict& arguments,
 
   bookmarks::BookmarkModel* model = GetBookmarkModel(session);
   if (!model) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "BookmarkModel을 가져올 수 없습니다 (프로파일 오류)");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
@@ -146,7 +153,7 @@ void BookmarkTool::Execute(const base::Value::Dict& arguments,
 
   // 모델이 아직 로드되지 않은 경우 대기 없이 오류 반환
   if (!model->loaded()) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "BookmarkModel이 아직 로드되지 않았습니다. 잠시 후 다시 시도하세요.");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
@@ -163,7 +170,7 @@ void BookmarkTool::Execute(const base::Value::Dict& arguments,
   } else if (action == "add") {
     const std::string* url = arguments.FindString("url");
     if (!url || url->empty()) {
-      base::Value::Dict err;
+      base::DictValue err;
       err.Set("error", "add 액션에는 url 파라미터가 필요합니다");
       std::move(callback).Run(base::Value(std::move(err)));
       return;
@@ -179,7 +186,7 @@ void BookmarkTool::Execute(const base::Value::Dict& arguments,
   } else if (action == "remove") {
     const std::string* bid = arguments.FindString("bookmarkId");
     if (!bid || bid->empty()) {
-      base::Value::Dict err;
+      base::DictValue err;
       err.Set("error", "remove 액션에는 bookmarkId 파라미터가 필요합니다");
       std::move(callback).Run(base::Value(std::move(err)));
       return;
@@ -189,7 +196,7 @@ void BookmarkTool::Execute(const base::Value::Dict& arguments,
   } else if (action == "search") {
     const std::string* q = arguments.FindString("query");
     if (!q || q->empty()) {
-      base::Value::Dict err;
+      base::DictValue err;
       err.Set("error", "search 액션에는 query 파라미터가 필요합니다");
       std::move(callback).Run(base::Value(std::move(err)));
       return;
@@ -200,7 +207,7 @@ void BookmarkTool::Execute(const base::Value::Dict& arguments,
     const std::string* bid  = arguments.FindString("bookmarkId");
     const std::string* dest = arguments.FindString("destinationFolderId");
     if (!bid || bid->empty() || !dest || dest->empty()) {
-      base::Value::Dict err;
+      base::DictValue err;
       err.Set("error",
               "move 액션에는 bookmarkId, destinationFolderId 파라미터가 필요합니다");
       std::move(callback).Run(base::Value(std::move(err)));
@@ -209,7 +216,7 @@ void BookmarkTool::Execute(const base::Value::Dict& arguments,
     result = ExecuteMove(*bid, *dest, model);
 
   } else {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "알 수 없는 action: " + action);
     std::move(callback).Run(base::Value(std::move(err)));
     return;
@@ -231,13 +238,13 @@ base::Value BookmarkTool::ExecuteList(const std::string& folder_id,
   } else {
     int64_t id = ParseNodeId(folder_id);
     if (id < 0) {
-      base::Value::Dict err;
+      base::DictValue err;
       err.Set("error", "유효하지 않은 folderId: " + folder_id);
       return base::Value(std::move(err));
     }
     parent = bookmarks::GetBookmarkNodeByID(model, id);
     if (!parent) {
-      base::Value::Dict err;
+      base::DictValue err;
       err.Set("error", "해당 ID 의 북마크 폴더를 찾을 수 없음: " + folder_id);
       return base::Value(std::move(err));
     }
@@ -247,12 +254,12 @@ base::Value BookmarkTool::ExecuteList(const std::string& folder_id,
             << " 자식 수=" << parent->children().size();
 
   // 자식 노드 직렬화 (1 depth)
-  base::Value::List children;
+  base::ListValue children;
   for (const auto& child : parent->children()) {
     children.Append(SerializeNode(child.get(), /*recursive=*/false));
   }
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success",  true);
   result.Set("folderId", folder_id.empty() ? "bar" : folder_id);
   result.Set("count",    static_cast<int>(children.size()));
@@ -269,7 +276,7 @@ base::Value BookmarkTool::ExecuteAdd(const std::string& parent_id,
                                       bookmarks::BookmarkModel* model) {
   GURL gurl(url);
   if (!gurl.is_valid()) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "유효하지 않은 URL: " + url);
     return base::Value(std::move(err));
   }
@@ -281,13 +288,13 @@ base::Value BookmarkTool::ExecuteAdd(const std::string& parent_id,
   } else {
     int64_t pid = ParseNodeId(parent_id);
     if (pid < 0) {
-      base::Value::Dict err;
+      base::DictValue err;
       err.Set("error", "유효하지 않은 folderId: " + parent_id);
       return base::Value(std::move(err));
     }
     parent = bookmarks::GetBookmarkNodeByID(model, pid);
     if (!parent || !parent->is_folder()) {
-      base::Value::Dict err;
+      base::DictValue err;
       err.Set("error", "해당 ID 의 폴더를 찾을 수 없음: " + parent_id);
       return base::Value(std::move(err));
     }
@@ -302,7 +309,7 @@ base::Value BookmarkTool::ExecuteAdd(const std::string& parent_id,
       gurl);
 
   if (!new_node) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "북마크 추가 실패");
     return base::Value(std::move(err));
   }
@@ -310,7 +317,7 @@ base::Value BookmarkTool::ExecuteAdd(const std::string& parent_id,
   LOG(INFO) << "[BookmarkTool] 북마크 추가 완료 id="
             << new_node->id() << " url=" << url;
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success",  true);
   result.Set("bookmark", SerializeNode(new_node, /*recursive=*/false));
   return base::Value(std::move(result));
@@ -323,7 +330,7 @@ base::Value BookmarkTool::ExecuteRemove(const std::string& bookmark_id,
                                          bookmarks::BookmarkModel* model) {
   int64_t id = ParseNodeId(bookmark_id);
   if (id < 0) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "유효하지 않은 bookmarkId: " + bookmark_id);
     return base::Value(std::move(err));
   }
@@ -331,14 +338,14 @@ base::Value BookmarkTool::ExecuteRemove(const std::string& bookmark_id,
   const bookmarks::BookmarkNode* node =
       bookmarks::GetBookmarkNodeByID(model, id);
   if (!node) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "해당 ID 의 북마크를 찾을 수 없음: " + bookmark_id);
     return base::Value(std::move(err));
   }
 
   // 루트 노드는 삭제할 수 없다.
   if (model->is_permanent_node(node)) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "루트 폴더(영구 노드)는 삭제할 수 없습니다");
     return base::Value(std::move(err));
   }
@@ -349,7 +356,7 @@ base::Value BookmarkTool::ExecuteRemove(const std::string& bookmark_id,
   model->Remove(node, bookmarks::metrics::BookmarkEditSource::kUser,
                 FROM_HERE);
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success",    true);
   result.Set("bookmarkId", bookmark_id);
   result.Set("message",    "북마크가 삭제되었습니다");
@@ -369,19 +376,23 @@ base::Value BookmarkTool::ExecuteSearch(const std::string& query,
   fields.url = std::make_unique<std::u16string>(base::UTF8ToUTF16(query));
 
   // GetBookmarksMatching: 기본 50개 최대
-  model->GetBookmarksMatching(query, /*max_count=*/50, &matches);
+  matches = model->GetBookmarksMatching(
+      base::UTF8ToUTF16(query), /*max_count=*/50,
+      query_parser::MatchingAlgorithm::DEFAULT);
 
   LOG(INFO) << "[BookmarkTool] 검색 완료 query='" << query
             << "' 결과=" << matches.size();
 
-  base::Value::List items;
+  base::ListValue items;
   for (const auto& match : matches) {
     if (match.node) {
-      items.Append(SerializeNode(match.node, /*recursive=*/false));
+      items.Append(SerializeNode(
+          static_cast<const bookmarks::BookmarkNode*>(match.node.get()),
+          /*recursive=*/false));
     }
   }
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success", true);
   result.Set("query",   query);
   result.Set("count",   static_cast<int>(items.size()));
@@ -399,12 +410,12 @@ base::Value BookmarkTool::ExecuteMove(const std::string& bookmark_id,
   int64_t did = ParseNodeId(destination_folder_id);
 
   if (bid < 0) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "유효하지 않은 bookmarkId: " + bookmark_id);
     return base::Value(std::move(err));
   }
   if (did < 0) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "유효하지 않은 destinationFolderId: " + destination_folder_id);
     return base::Value(std::move(err));
   }
@@ -412,7 +423,7 @@ base::Value BookmarkTool::ExecuteMove(const std::string& bookmark_id,
   const bookmarks::BookmarkNode* node =
       bookmarks::GetBookmarkNodeByID(model, bid);
   if (!node) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "이동할 북마크를 찾을 수 없음: " + bookmark_id);
     return base::Value(std::move(err));
   }
@@ -420,14 +431,14 @@ base::Value BookmarkTool::ExecuteMove(const std::string& bookmark_id,
   const bookmarks::BookmarkNode* dest =
       bookmarks::GetBookmarkNodeByID(model, did);
   if (!dest || !dest->is_folder()) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "목적지 폴더를 찾을 수 없음: " + destination_folder_id);
     return base::Value(std::move(err));
   }
 
   // 영구 노드(루트)는 이동 불가
   if (model->is_permanent_node(node)) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "루트 폴더(영구 노드)는 이동할 수 없습니다");
     return base::Value(std::move(err));
   }
@@ -438,7 +449,7 @@ base::Value BookmarkTool::ExecuteMove(const std::string& bookmark_id,
   // BookmarkModel::Move: 목적지 폴더의 마지막 위치로 이동
   model->Move(node, dest, dest->children().size());
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success",             true);
   result.Set("bookmarkId",          bookmark_id);
   result.Set("destinationFolderId", destination_folder_id);
@@ -453,7 +464,12 @@ base::Value BookmarkTool::ExecuteMove(const std::string& bookmark_id,
 bookmarks::BookmarkModel* BookmarkTool::GetBookmarkModel(McpSession* session) {
   if (!session) return nullptr;
 
-  Profile* profile = session->GetProfile();
+  Browser* browser = chrome::FindLastActive();
+  if (!browser) {
+    LOG(ERROR) << "[BookmarkTool] 활성 Browser 를 찾을 수 없음";
+    return nullptr;
+  }
+  Profile* profile = browser->profile();
   if (!profile) {
     LOG(ERROR) << "[BookmarkTool] Profile 을 가져올 수 없음";
     return nullptr;
@@ -480,20 +496,20 @@ int64_t BookmarkTool::ParseNodeId(const std::string& id_str) {
 }
 
 // -----------------------------------------------------------------------
-// 정적 헬퍼: BookmarkNode → base::Value::Dict
+// 정적 헬퍼: BookmarkNode → base::DictValue
 // -----------------------------------------------------------------------
 // static
-base::Value::Dict BookmarkTool::SerializeNode(
+base::DictValue BookmarkTool::SerializeNode(
     const bookmarks::BookmarkNode* node,
     bool recursive) {
-  base::Value::Dict d;
+  base::DictValue d;
   if (!node) return d;
 
   d.Set("id",       base::NumberToString(node->id()));
   d.Set("title",    base::UTF16ToUTF8(node->GetTitle()));
   d.Set("isFolder", node->is_folder());
   d.Set("dateAdded",
-        node->date_added().InMillisecondsSinceUnixEpoch());
+        static_cast<double>(node->date_added().InMillisecondsSinceUnixEpoch()));
 
   if (!node->is_folder()) {
     d.Set("url", node->url().spec());
@@ -504,7 +520,7 @@ base::Value::Dict BookmarkTool::SerializeNode(
   }
 
   if (recursive && node->is_folder()) {
-    base::Value::List children;
+    base::ListValue children;
     for (const auto& child : node->children()) {
       children.Append(SerializeNode(child.get(), /*recursive=*/true));
     }
@@ -518,12 +534,12 @@ base::Value::Dict BookmarkTool::SerializeNode(
 }
 
 // -----------------------------------------------------------------------
-// 정적 헬퍼: 노드 포인터 목록 → base::Value::List
+// 정적 헬퍼: 노드 포인터 목록 → base::ListValue
 // -----------------------------------------------------------------------
 // static
-base::Value::List BookmarkTool::SerializeNodeList(
+base::ListValue BookmarkTool::SerializeNodeList(
     const std::vector<const bookmarks::BookmarkNode*>& nodes) {
-  base::Value::List list;
+  base::ListValue list;
   for (const auto* node : nodes) {
     list.Append(SerializeNode(node, /*recursive=*/false));
   }

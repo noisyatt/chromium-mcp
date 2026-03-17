@@ -8,6 +8,7 @@
 
 #include "base/command_line.h"
 #include "base/environment.h"
+#include "base/no_destructor.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
@@ -71,12 +72,39 @@ constexpr int kJsonRpcParseError = -32700;
 constexpr int kJsonRpcInvalidRequest = -32600;
 constexpr int kJsonRpcMethodNotFound = -32601;
 constexpr int kJsonRpcInvalidParams = -32602;
-constexpr int kJsonRpcInternalError = -32603;
+
 
 namespace mcp {
 
+McpServer::Config::Config() = default;
+McpServer::Config::~Config() = default;
+
+McpToolDefinition::McpToolDefinition() = default;
+McpToolDefinition::~McpToolDefinition() = default;
+McpToolDefinition::McpToolDefinition(McpToolDefinition&&) = default;
+McpToolDefinition& McpToolDefinition::operator=(McpToolDefinition&&) = default;
+
 McpServer::McpServer() = default;
 McpServer::~McpServer() = default;
+
+// static
+McpServer* McpServer::GetInstance() {
+  static base::NoDestructor<McpServer> instance;
+  return instance.get();
+}
+
+void McpServer::StartWithStdio() {
+  auto config = std::make_unique<Config>();
+  config->transport_mode = McpTransportMode::kStdio;
+  Initialize(std::move(config), nullptr);
+}
+
+void McpServer::StartWithSocket(const std::string& socket_path) {
+  auto config = std::make_unique<Config>();
+  config->transport_mode = McpTransportMode::kSocket;
+  config->socket_path = socket_path;
+  Initialize(std::move(config), nullptr);
+}
 
 // static
 bool McpServer::ShouldStart() {
@@ -90,8 +118,8 @@ bool McpServer::ShouldStart() {
   // 2. 환경변수 확인 (CHROMIUM_MCP=1)
   // 플래그보다 은닉성이 높은 활성화 방법
   std::unique_ptr<base::Environment> env = base::Environment::Create();
-  std::string env_value;
-  if (env->GetVar(kMcpEnvVar, &env_value) && env_value == "1") {
+  auto env_value = env->GetVar(kMcpEnvVar);
+  if (env_value.has_value() && *env_value == "1") {
     LOG(INFO) << "[MCP] 환경변수로 MCP 서버 활성화";
     return true;
   }
@@ -113,17 +141,18 @@ bool McpServer::Initialize(std::unique_ptr<Config> config,
                     : "socket");
 
   // 전송 계층 생성
-  // 실제 빌드 시 McpTransportStdio / McpTransportSocket 인스턴스 생성
-  // transport_ = (config_->transport_mode == McpTransportMode::kStdio)
-  //     ? std::make_unique<McpTransportStdio>()
-  //     : std::make_unique<McpTransportSocket>(config_->socket_path);
+  if (config_->transport_mode == McpTransportMode::kStdio) {
+    transport_ = std::make_unique<McpTransportStdio>();
+  } else {
+    transport_ = std::make_unique<McpTransportSocket>(config_->socket_path);
+  }
 
-  // 전송 계층에서 메시지 수신 시 OnMessageReceived() 호출 등록
-  // transport_->SetMessageCallback(
-  //     base::BindRepeating(&McpServer::OnMessageReceived,
-  //                         weak_factory_.GetWeakPtr()));
-
-  // transport_->Start();
+  // 전송 계층 시작: 메시지 수신 및 연결 해제 콜백 등록
+  transport_->Start(
+      base::BindRepeating(&McpServer::OnMessageReceived,
+                          weak_factory_.GetWeakPtr()),
+      base::BindRepeating(&McpServer::Shutdown,
+                          weak_factory_.GetWeakPtr()));
 
   // 기본 내장 도구 등록 (navigate, screenshot 등)
   RegisterBuiltinTools();
@@ -237,7 +266,7 @@ void McpServer::OnMessageReceived(const std::string& json_message) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // JSON 파싱
-  auto parsed = base::JSONReader::ReadAndReturnValueWithError(json_message);
+  auto parsed = base::JSONReader::ReadAndReturnValueWithError(json_message, base::JSON_PARSE_RFC);
   if (!parsed.has_value()) {
     LOG(WARNING) << "[MCP] JSON 파싱 실패: " << parsed.error().message;
     // id를 알 수 없으므로 null로 오류 응답
@@ -254,7 +283,7 @@ void McpServer::OnMessageReceived(const std::string& json_message) {
   HandleMessage(std::move(parsed->GetDict()));
 }
 
-void McpServer::HandleMessage(base::Value::Dict message) {
+void McpServer::HandleMessage(base::DictValue message) {
   // jsonrpc 버전 검증
   const std::string* jsonrpc = message.FindString("jsonrpc");
   if (!jsonrpc || *jsonrpc != "2.0") {
@@ -275,7 +304,7 @@ void McpServer::HandleMessage(base::Value::Dict message) {
 
   // id 추출 (알림 메시지는 id 없음)
   const base::Value* id = message.Find("id");
-  const base::Value::Dict* params = message.FindDict("params");
+  const base::DictValue* params = message.FindDict("params");
 
   LOG(INFO) << "[MCP] 수신된 method: " << *method;
 
@@ -299,7 +328,7 @@ void McpServer::HandleMessage(base::Value::Dict message) {
 // -----------------------------------------------------------------------
 
 void McpServer::HandleInitialize(const base::Value* id,
-                                  const base::Value::Dict* params) {
+                                  const base::DictValue* params) {
   // 이미 초기화된 경우 재초기화 무시
   if (handshake_state_ != HandshakeState::kNotStarted) {
     LOG(WARNING) << "[MCP] 이미 초기화됨. initialize 요청 무시.";
@@ -312,7 +341,7 @@ void McpServer::HandleInitialize(const base::Value* id,
     if (const std::string* ver = params->FindString("protocolVersion")) {
       protocol_version_ = *ver;
     }
-    if (const base::Value::Dict* client_info = params->FindDict("clientInfo")) {
+    if (const base::DictValue* client_info = params->FindDict("clientInfo")) {
       if (const std::string* name = client_info->FindString("name")) {
         client_name_ = *name;
       }
@@ -331,16 +360,16 @@ void McpServer::HandleInitialize(const base::Value* id,
   // MCP initialize 응답 구성.
   // serverInfo: 이 서버의 이름과 버전
   // capabilities.tools: 도구 호출 기능 지원 선언
-  base::Value::Dict server_info;
+  base::DictValue server_info;
   server_info.Set("name", kMcpServerName);
   server_info.Set("version", kMcpServerVersion);
 
   // capabilities: 서버가 지원하는 MCP 기능 목록
   // tools: 빈 객체({})는 tools/list, tools/call 지원을 의미
-  base::Value::Dict capabilities;
-  capabilities.Set("tools", base::Value::Dict());
+  base::DictValue capabilities;
+  capabilities.Set("tools", base::DictValue());
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("protocolVersion", kMcpProtocolVersion);
   result.Set("serverInfo", std::move(server_info));
   result.Set("capabilities", std::move(capabilities));
@@ -375,11 +404,11 @@ void McpServer::HandleToolsList(const base::Value* id) {
   }
 
   // 등록된 모든 도구의 명세를 배열로 직렬화
-  base::Value::List tools_array;
+  base::ListValue tools_array;
 
   // 1. 인라인 등록 도구
   for (const auto& [name, tool_def] : tools_) {
-    base::Value::Dict tool_entry;
+    base::DictValue tool_entry;
     tool_entry.Set("name", tool_def.name);
     tool_entry.Set("description", tool_def.description);
     tool_entry.Set("inputSchema", tool_def.input_schema.Clone());
@@ -396,7 +425,7 @@ void McpServer::HandleToolsList(const base::Value* id) {
     }
   }
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("tools", std::move(tools_array));
 
   size_t total = tools_.size() + (tool_registry_ ? tool_registry_->GetToolCount() : 0);
@@ -409,7 +438,7 @@ void McpServer::HandleToolsList(const base::Value* id) {
 // -----------------------------------------------------------------------
 
 void McpServer::HandleToolsCall(const base::Value* id,
-                                 const base::Value::Dict* params) {
+                                 const base::DictValue* params) {
   if (handshake_state_ != HandshakeState::kReady) {
     SendError(id, kJsonRpcInvalidRequest, "Server not ready. Call initialize first.");
     return;
@@ -428,9 +457,9 @@ void McpServer::HandleToolsCall(const base::Value* id,
   }
 
   // 도구 인자 추출 (없으면 빈 딕셔너리 사용)
-  const base::Value::Dict* arguments = params->FindDict("arguments");
-  base::Value::Dict empty_args;
-  const base::Value::Dict& tool_args = arguments ? *arguments : empty_args;
+  const base::DictValue* arguments = params->FindDict("arguments");
+  base::DictValue empty_args;
+  const base::DictValue& tool_args = arguments ? *arguments : empty_args;
 
   LOG(INFO) << "[MCP] 도구 실행: " << *tool_name;
 
@@ -461,7 +490,7 @@ void McpServer::HandleToolsCall(const base::Value* id,
   // 2. McpToolRegistry 기반 도구에서 검색
   if (tool_registry_) {
     tool_registry_->DispatchToolCall(
-        *tool_name, tool_args, session_.get(), std::move(result_callback));
+        *tool_name, tool_args, GetActiveSession(), std::move(result_callback));
     return;
   }
 
@@ -486,7 +515,7 @@ void McpServer::HandleUnknownMethod(const base::Value* id,
 // -----------------------------------------------------------------------
 
 void McpServer::SendResult(const base::Value* id, base::Value result) {
-  base::Value::Dict response;
+  base::DictValue response;
   response.Set("jsonrpc", "2.0");
   if (id) {
     response.Set("id", id->Clone());
@@ -500,11 +529,11 @@ void McpServer::SendResult(const base::Value* id, base::Value result) {
 void McpServer::SendError(const base::Value* id,
                            int code,
                            const std::string& message) {
-  base::Value::Dict error_obj;
+  base::DictValue error_obj;
   error_obj.Set("code", code);
   error_obj.Set("message", message);
 
-  base::Value::Dict response;
+  base::DictValue response;
   response.Set("jsonrpc", "2.0");
   if (id) {
     response.Set("id", id->Clone());
@@ -515,7 +544,7 @@ void McpServer::SendError(const base::Value* id,
   SendMessage(std::move(response));
 }
 
-void McpServer::SendMessage(base::Value::Dict message) {
+void McpServer::SendMessage(base::DictValue message) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // base::Value를 JSON 문자열로 직렬화
@@ -531,7 +560,7 @@ void McpServer::SendMessage(base::Value::Dict message) {
     return;
   }
 
-  // transport_->SendMessage(json_output);
+  transport_->Send(json_output);
 }
 
 // -----------------------------------------------------------------------
@@ -614,19 +643,19 @@ void McpServer::RegisterBuiltinTools() {
 }
 
 void McpServer::RegisterNavigateTool() {
-  base::Value::Dict schema;
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
   {
-    base::Value::Dict url_prop;
+    base::DictValue url_prop;
     url_prop.Set("type", "string");
     url_prop.Set("description", "이동할 URL (예: https://example.com)");
     properties.Set("url", std::move(url_prop));
 
-    base::Value::Dict action_prop;
+    base::DictValue action_prop;
     action_prop.Set("type", "string");
-    base::Value::List action_enum;
+    base::ListValue action_enum;
     action_enum.Append("url");
     action_enum.Append("back");
     action_enum.Append("forward");
@@ -647,19 +676,19 @@ void McpServer::RegisterNavigateTool() {
 }
 
 void McpServer::RegisterScreenshotTool() {
-  base::Value::Dict schema;
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
   {
-    base::Value::Dict full_page_prop;
+    base::DictValue full_page_prop;
     full_page_prop.Set("type", "boolean");
     full_page_prop.Set("description", "전체 페이지 캡처 여부 (기본: false)");
     properties.Set("fullPage", std::move(full_page_prop));
 
-    base::Value::Dict format_prop;
+    base::DictValue format_prop;
     format_prop.Set("type", "string");
-    base::Value::List fmt_enum;
+    base::ListValue fmt_enum;
     fmt_enum.Append("png");
     fmt_enum.Append("jpeg");
     format_prop.Set("enum", std::move(fmt_enum));
@@ -678,14 +707,14 @@ void McpServer::RegisterScreenshotTool() {
 }
 
 void McpServer::RegisterPageContentTool() {
-  base::Value::Dict schema;
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
   {
-    base::Value::Dict mode_prop;
+    base::DictValue mode_prop;
     mode_prop.Set("type", "string");
-    base::Value::List mode_enum;
+    base::ListValue mode_enum;
     mode_enum.Append("accessibility");
     mode_enum.Append("html");
     mode_enum.Append("text");
@@ -693,7 +722,7 @@ void McpServer::RegisterPageContentTool() {
     mode_prop.Set("description", "반환 형식 (기본: accessibility)");
     properties.Set("mode", std::move(mode_prop));
 
-    base::Value::Dict selector_prop;
+    base::DictValue selector_prop;
     selector_prop.Set("type", "string");
     selector_prop.Set("description", "특정 요소만 가져올 CSS 선택자 (선택적)");
     properties.Set("selector", std::move(selector_prop));
@@ -710,19 +739,19 @@ void McpServer::RegisterPageContentTool() {
 }
 
 void McpServer::RegisterClickTool() {
-  base::Value::Dict schema;
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
   {
-    base::Value::Dict sel_prop;
+    base::DictValue sel_prop;
     sel_prop.Set("type", "string");
     sel_prop.Set("description", "클릭할 요소의 CSS 선택자");
     properties.Set("selector", std::move(sel_prop));
 
-    base::Value::Dict btn_prop;
+    base::DictValue btn_prop;
     btn_prop.Set("type", "string");
-    base::Value::List btn_enum;
+    base::ListValue btn_enum;
     btn_enum.Append("left");
     btn_enum.Append("right");
     btn_enum.Append("middle");
@@ -732,7 +761,7 @@ void McpServer::RegisterClickTool() {
   }
   schema.Set("properties", std::move(properties));
 
-  base::Value::List required;
+  base::ListValue required;
   required.Append("selector");
   schema.Set("required", std::move(required));
 
@@ -746,24 +775,24 @@ void McpServer::RegisterClickTool() {
 }
 
 void McpServer::RegisterFillTool() {
-  base::Value::Dict schema;
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
   {
-    base::Value::Dict sel_prop;
+    base::DictValue sel_prop;
     sel_prop.Set("type", "string");
     sel_prop.Set("description", "입력 필드의 CSS 선택자");
     properties.Set("selector", std::move(sel_prop));
 
-    base::Value::Dict val_prop;
+    base::DictValue val_prop;
     val_prop.Set("type", "string");
     val_prop.Set("description", "입력할 값");
     properties.Set("value", std::move(val_prop));
   }
   schema.Set("properties", std::move(properties));
 
-  base::Value::List required;
+  base::ListValue required;
   required.Append("selector");
   required.Append("value");
   schema.Set("required", std::move(required));
@@ -778,24 +807,24 @@ void McpServer::RegisterFillTool() {
 }
 
 void McpServer::RegisterEvaluateTool() {
-  base::Value::Dict schema;
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
   {
-    base::Value::Dict expr_prop;
+    base::DictValue expr_prop;
     expr_prop.Set("type", "string");
     expr_prop.Set("description", "실행할 JavaScript 코드");
     properties.Set("expression", std::move(expr_prop));
 
-    base::Value::Dict await_prop;
+    base::DictValue await_prop;
     await_prop.Set("type", "boolean");
     await_prop.Set("description", "Promise 대기 여부 (기본: true)");
     properties.Set("awaitPromise", std::move(await_prop));
   }
   schema.Set("properties", std::move(properties));
 
-  base::Value::List required;
+  base::ListValue required;
   required.Append("expression");
   schema.Set("required", std::move(required));
 
@@ -809,28 +838,28 @@ void McpServer::RegisterEvaluateTool() {
 }
 
 void McpServer::RegisterNetworkCaptureTool() {
-  base::Value::Dict schema;
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
   {
-    base::Value::Dict action_prop;
+    base::DictValue action_prop;
     action_prop.Set("type", "string");
-    base::Value::List action_enum;
+    base::ListValue action_enum;
     action_enum.Append("start");
     action_enum.Append("stop");
     action_prop.Set("enum", std::move(action_enum));
     action_prop.Set("description", "캡처 시작 또는 중지");
     properties.Set("action", std::move(action_prop));
 
-    base::Value::Dict body_prop;
+    base::DictValue body_prop;
     body_prop.Set("type", "boolean");
     body_prop.Set("description", "응답 본문 포함 여부 (기본: false)");
     properties.Set("includeResponseBody", std::move(body_prop));
   }
   schema.Set("properties", std::move(properties));
 
-  base::Value::List required;
+  base::ListValue required;
   required.Append("action");
   schema.Set("required", std::move(required));
 
@@ -844,12 +873,12 @@ void McpServer::RegisterNetworkCaptureTool() {
 }
 
 void McpServer::RegisterNetworkRequestsTool() {
-  base::Value::Dict schema;
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
   {
-    base::Value::Dict static_prop;
+    base::DictValue static_prop;
     static_prop.Set("type", "boolean");
     static_prop.Set("description", "정적 리소스 포함 여부 (기본: false)");
     properties.Set("includeStatic", std::move(static_prop));
@@ -866,14 +895,14 @@ void McpServer::RegisterNetworkRequestsTool() {
 }
 
 void McpServer::RegisterTabsTool() {
-  base::Value::Dict schema;
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
   {
-    base::Value::Dict action_prop;
+    base::DictValue action_prop;
     action_prop.Set("type", "string");
-    base::Value::List action_enum;
+    base::ListValue action_enum;
     action_enum.Append("list");
     action_enum.Append("new");
     action_enum.Append("close");
@@ -881,19 +910,19 @@ void McpServer::RegisterTabsTool() {
     action_prop.Set("enum", std::move(action_enum));
     properties.Set("action", std::move(action_prop));
 
-    base::Value::Dict tab_id_prop;
+    base::DictValue tab_id_prop;
     tab_id_prop.Set("type", "number");
     tab_id_prop.Set("description", "탭 ID (close/select에서 사용)");
     properties.Set("tabId", std::move(tab_id_prop));
 
-    base::Value::Dict url_prop;
+    base::DictValue url_prop;
     url_prop.Set("type", "string");
     url_prop.Set("description", "새 탭 URL (new 동작에서 사용)");
     properties.Set("url", std::move(url_prop));
   }
   schema.Set("properties", std::move(properties));
 
-  base::Value::List required;
+  base::ListValue required;
   required.Append("action");
   schema.Set("required", std::move(required));
 
@@ -907,9 +936,9 @@ void McpServer::RegisterTabsTool() {
 }
 
 void McpServer::RegisterBrowserInfoTool() {
-  base::Value::Dict schema;
+  base::DictValue schema;
   schema.Set("type", "object");
-  schema.Set("properties", base::Value::Dict());
+  schema.Set("properties", base::DictValue());
 
   McpToolDefinition def;
   def.name = "browser_info";
@@ -924,7 +953,7 @@ void McpServer::RegisterBrowserInfoTool() {
 // 도구 실행 핸들러 구현
 // -----------------------------------------------------------------------
 
-void McpServer::ExecuteNavigate(const base::Value::Dict& params,
+void McpServer::ExecuteNavigate(const base::DictValue& params,
                                  base::OnceCallback<void(base::Value)> callback) {
   McpSession* session = GetActiveSession();
   if (!session) {
@@ -944,7 +973,7 @@ void McpServer::ExecuteNavigate(const base::Value::Dict& params,
     }
 
     // CDP Page.navigate 명령 파라미터 구성
-    base::Value::Dict cdp_params;
+    base::DictValue cdp_params;
     cdp_params.Set("url", *url);
 
     // McpSession을 통해 CDP 명령 비동기 실행.
@@ -954,7 +983,7 @@ void McpServer::ExecuteNavigate(const base::Value::Dict& params,
         std::move(cdp_params),
         base::BindOnce(
             [](base::OnceCallback<void(base::Value)> callback,
-               std::optional<base::Value::Dict> cdp_result,
+               std::optional<base::DictValue> cdp_result,
                const std::string& error) {
               if (!error.empty()) {
                 std::move(callback).Run(MakeErrorResult("탐색 실패: " + error));
@@ -972,12 +1001,12 @@ void McpServer::ExecuteNavigate(const base::Value::Dict& params,
 
   } else if (action_str == "back") {
     // 히스토리 뒤로 이동: Runtime.evaluate로 history.back() 실행
-    base::Value::Dict cdp_params;
+    base::DictValue cdp_params;
     cdp_params.Set("expression", "history.back()");
     cdp_params.Set("returnByValue", false);
     session->SendCdpCommand("Runtime.evaluate", std::move(cdp_params),
         base::BindOnce([](base::OnceCallback<void(base::Value)> cb,
-                          std::optional<base::Value::Dict>,
+                          std::optional<base::DictValue>,
                           const std::string& err) {
           if (!err.empty()) {
             std::move(cb).Run(MakeErrorResult("뒤로 이동 실패: " + err));
@@ -987,12 +1016,12 @@ void McpServer::ExecuteNavigate(const base::Value::Dict& params,
         }, std::move(callback)));
 
   } else if (action_str == "forward") {
-    base::Value::Dict cdp_params;
+    base::DictValue cdp_params;
     cdp_params.Set("expression", "history.forward()");
     cdp_params.Set("returnByValue", false);
     session->SendCdpCommand("Runtime.evaluate", std::move(cdp_params),
         base::BindOnce([](base::OnceCallback<void(base::Value)> cb,
-                          std::optional<base::Value::Dict>,
+                          std::optional<base::DictValue>,
                           const std::string& err) {
           if (!err.empty()) {
             std::move(cb).Run(MakeErrorResult("앞으로 이동 실패: " + err));
@@ -1003,11 +1032,11 @@ void McpServer::ExecuteNavigate(const base::Value::Dict& params,
 
   } else if (action_str == "reload") {
     // 페이지 새로고침: Page.reload CDP 명령
-    base::Value::Dict cdp_params;
+    base::DictValue cdp_params;
     cdp_params.Set("ignoreCache", false);
     session->SendCdpCommand("Page.reload", std::move(cdp_params),
         base::BindOnce([](base::OnceCallback<void(base::Value)> cb,
-                          std::optional<base::Value::Dict>,
+                          std::optional<base::DictValue>,
                           const std::string& err) {
           if (!err.empty()) {
             std::move(cb).Run(MakeErrorResult("새로고침 실패: " + err));
@@ -1022,7 +1051,7 @@ void McpServer::ExecuteNavigate(const base::Value::Dict& params,
 }
 
 void McpServer::ExecuteScreenshot(
-    const base::Value::Dict& params,
+    const base::DictValue& params,
     base::OnceCallback<void(base::Value)> callback) {
   McpSession* session = GetActiveSession();
   if (!session) {
@@ -1031,7 +1060,7 @@ void McpServer::ExecuteScreenshot(
   }
 
   // CDP Page.captureScreenshot 파라미터 구성
-  base::Value::Dict cdp_params;
+  base::DictValue cdp_params;
 
   // 이미지 형식 설정 (기본: png)
   const std::string* format = params.FindString("format");
@@ -1048,7 +1077,7 @@ void McpServer::ExecuteScreenshot(
       std::move(cdp_params),
       base::BindOnce(
           [](base::OnceCallback<void(base::Value)> callback,
-             std::optional<base::Value::Dict> cdp_result,
+             std::optional<base::DictValue> cdp_result,
              const std::string& error) {
             if (!error.empty()) {
               std::move(callback).Run(
@@ -1069,15 +1098,15 @@ void McpServer::ExecuteScreenshot(
 
             // MCP 이미지 응답 포맷:
             // {"content": [{"type": "image", "data": "...", "mimeType": "..."}]}
-            base::Value::Dict image_content;
+            base::DictValue image_content;
             image_content.Set("type", "image");
             image_content.Set("data", *data);
             image_content.Set("mimeType", "image/png");
 
-            base::Value::List content_list;
+            base::ListValue content_list;
             content_list.Append(std::move(image_content));
 
-            base::Value::Dict result;
+            base::DictValue result;
             result.Set("content", std::move(content_list));
             std::move(callback).Run(base::Value(std::move(result)));
           },
@@ -1085,7 +1114,7 @@ void McpServer::ExecuteScreenshot(
 }
 
 void McpServer::ExecutePageContent(
-    const base::Value::Dict& params,
+    const base::DictValue& params,
     base::OnceCallback<void(base::Value)> callback) {
   McpSession* session = GetActiveSession();
   if (!session) {
@@ -1098,15 +1127,15 @@ void McpServer::ExecutePageContent(
 
   if (mode_str == "html") {
     // DOM.getOuterHTML: 전체 페이지 HTML 반환
-    base::Value::Dict cdp_params;
+    base::DictValue cdp_params;
     // nodeId 없이 호출하면 document 루트 반환
     session->SendCdpCommand(
         "DOM.getDocument",
-        base::Value::Dict(),
+        base::DictValue(),
         base::BindOnce(
             [](McpSession* session,
                base::OnceCallback<void(base::Value)> callback,
-               std::optional<base::Value::Dict> result,
+               std::optional<base::DictValue> result,
                const std::string& error) {
               if (!error.empty() || !result) {
                 std::move(callback).Run(
@@ -1114,7 +1143,7 @@ void McpServer::ExecutePageContent(
                 return;
               }
               // root.nodeId 추출 후 getOuterHTML 호출
-              const base::Value::Dict* root = result->FindDict("root");
+              const base::DictValue* root = result->FindDict("root");
               if (!root) {
                 std::move(callback).Run(MakeErrorResult("루트 노드 없음"));
                 return;
@@ -1124,14 +1153,14 @@ void McpServer::ExecutePageContent(
                 std::move(callback).Run(MakeErrorResult("nodeId 없음"));
                 return;
               }
-              base::Value::Dict html_params;
+              base::DictValue html_params;
               html_params.Set("nodeId", *node_id);
               session->SendCdpCommand(
                   "DOM.getOuterHTML",
                   std::move(html_params),
                   base::BindOnce(
                       [](base::OnceCallback<void(base::Value)> cb,
-                         std::optional<base::Value::Dict> html_result,
+                         std::optional<base::DictValue> html_result,
                          const std::string& html_error) {
                         if (!html_error.empty() || !html_result) {
                           std::move(cb).Run(
@@ -1148,7 +1177,7 @@ void McpServer::ExecutePageContent(
 
   } else if (mode_str == "text") {
     // Runtime.evaluate로 document.body.innerText 실행
-    base::Value::Dict cdp_params;
+    base::DictValue cdp_params;
     cdp_params.Set("expression", "document.body ? document.body.innerText : ''");
     cdp_params.Set("returnByValue", true);
     session->SendCdpCommand(
@@ -1156,14 +1185,14 @@ void McpServer::ExecutePageContent(
         std::move(cdp_params),
         base::BindOnce(
             [](base::OnceCallback<void(base::Value)> cb,
-               std::optional<base::Value::Dict> result,
+               std::optional<base::DictValue> result,
                const std::string& error) {
               if (!error.empty() || !result) {
                 std::move(cb).Run(MakeErrorResult("텍스트 추출 실패: " + error));
                 return;
               }
               // 결과 구조: {"result": {"type": "string", "value": "..."}}
-              const base::Value::Dict* inner = result->FindDict("result");
+              const base::DictValue* inner = result->FindDict("result");
               std::string text;
               if (inner) {
                 if (const std::string* val = inner->FindString("value")) {
@@ -1178,10 +1207,10 @@ void McpServer::ExecutePageContent(
     // accessibility 모드: Accessibility.getFullAXTree 실행
     session->SendCdpCommand(
         "Accessibility.getFullAXTree",
-        base::Value::Dict(),
+        base::DictValue(),
         base::BindOnce(
             [](base::OnceCallback<void(base::Value)> cb,
-               std::optional<base::Value::Dict> result,
+               std::optional<base::DictValue> result,
                const std::string& error) {
               if (!error.empty() || !result) {
                 std::move(cb).Run(
@@ -1197,7 +1226,7 @@ void McpServer::ExecutePageContent(
   }
 }
 
-void McpServer::ExecuteClick(const base::Value::Dict& params,
+void McpServer::ExecuteClick(const base::DictValue& params,
                               base::OnceCallback<void(base::Value)> callback) {
   McpSession* session = GetActiveSession();
   if (!session) {
@@ -1222,7 +1251,7 @@ void McpServer::ExecuteClick(const base::Value::Dict& params,
       "  return {x: r.left + r.width/2, y: r.top + r.height/2};"
       "})()";
 
-  base::Value::Dict cdp_params;
+  base::DictValue cdp_params;
   cdp_params.Set("expression", js);
   cdp_params.Set("returnByValue", true);
 
@@ -1233,7 +1262,7 @@ void McpServer::ExecuteClick(const base::Value::Dict& params,
           [](McpSession* session,
              std::string button_str,
              base::OnceCallback<void(base::Value)> callback,
-             std::optional<base::Value::Dict> result,
+             std::optional<base::DictValue> result,
              const std::string& error) {
             if (!error.empty() || !result) {
               std::move(callback).Run(
@@ -1241,12 +1270,12 @@ void McpServer::ExecuteClick(const base::Value::Dict& params,
               return;
             }
             // 좌표 추출
-            const base::Value::Dict* inner = result->FindDict("result");
+            const base::DictValue* inner = result->FindDict("result");
             if (!inner) {
               std::move(callback).Run(MakeErrorResult("결과 없음"));
               return;
             }
-            const base::Value::Dict* coords = inner->FindDict("value");
+            const base::DictValue* coords = inner->FindDict("value");
             if (!coords) {
               std::move(callback).Run(MakeErrorResult("요소를 찾을 수 없습니다."));
               return;
@@ -1260,7 +1289,7 @@ void McpServer::ExecuteClick(const base::Value::Dict& params,
 
             // Input.dispatchMouseEvent로 mousedown → mouseup → click 시퀀스 전송
             auto send_mouse_event = [&](const std::string& type) {
-              base::Value::Dict mouse_params;
+              base::DictValue mouse_params;
               mouse_params.Set("type", type);
               mouse_params.Set("x", *x);
               mouse_params.Set("y", *y);
@@ -1269,7 +1298,7 @@ void McpServer::ExecuteClick(const base::Value::Dict& params,
               session->SendCdpCommand(
                   "Input.dispatchMouseEvent",
                   std::move(mouse_params),
-                  base::DoNothing());
+                  base::BindOnce([](base::Value) {}));
             };
 
             send_mouse_event("mousePressed");
@@ -1282,7 +1311,7 @@ void McpServer::ExecuteClick(const base::Value::Dict& params,
           std::move(callback)));
 }
 
-void McpServer::ExecuteFill(const base::Value::Dict& params,
+void McpServer::ExecuteFill(const base::DictValue& params,
                              base::OnceCallback<void(base::Value)> callback) {
   McpSession* session = GetActiveSession();
   if (!session) {
@@ -1317,7 +1346,7 @@ void McpServer::ExecuteFill(const base::Value::Dict& params,
       "  return 'ok';"
       "})()";
 
-  base::Value::Dict cdp_params;
+  base::DictValue cdp_params;
   cdp_params.Set("expression", js);
   cdp_params.Set("returnByValue", true);
 
@@ -1326,7 +1355,7 @@ void McpServer::ExecuteFill(const base::Value::Dict& params,
       std::move(cdp_params),
       base::BindOnce(
           [](base::OnceCallback<void(base::Value)> cb,
-             std::optional<base::Value::Dict> result,
+             std::optional<base::DictValue> result,
              const std::string& error) {
             if (!error.empty()) {
               std::move(cb).Run(MakeErrorResult("입력 실패: " + error));
@@ -1337,7 +1366,7 @@ void McpServer::ExecuteFill(const base::Value::Dict& params,
           std::move(callback)));
 }
 
-void McpServer::ExecuteEvaluate(const base::Value::Dict& params,
+void McpServer::ExecuteEvaluate(const base::DictValue& params,
                                  base::OnceCallback<void(base::Value)> callback) {
   McpSession* session = GetActiveSession();
   if (!session) {
@@ -1357,7 +1386,7 @@ void McpServer::ExecuteEvaluate(const base::Value::Dict& params,
   // 핵심: Runtime.enable을 보내지 않고 evaluate만 직접 호출.
   // 외부 CDP에서는 불가능하지만 내부 세션에서는 가능.
   // 이를 통해 "Runtime.enable" 탐지 신호 회피.
-  base::Value::Dict cdp_params;
+  base::DictValue cdp_params;
   cdp_params.Set("expression", *expression);
   cdp_params.Set("returnByValue", true);
   cdp_params.Set("awaitPromise", await_promise.value_or(true));
@@ -1367,7 +1396,7 @@ void McpServer::ExecuteEvaluate(const base::Value::Dict& params,
       std::move(cdp_params),
       base::BindOnce(
           [](base::OnceCallback<void(base::Value)> cb,
-             std::optional<base::Value::Dict> result,
+             std::optional<base::DictValue> result,
              const std::string& error) {
             if (!error.empty()) {
               std::move(cb).Run(MakeErrorResult("실행 실패: " + error));
@@ -1386,7 +1415,7 @@ void McpServer::ExecuteEvaluate(const base::Value::Dict& params,
 }
 
 void McpServer::ExecuteNetworkCapture(
-    const base::Value::Dict& params,
+    const base::DictValue& params,
     base::OnceCallback<void(base::Value)> callback) {
   McpSession* session = GetActiveSession();
   if (!session) {
@@ -1403,7 +1432,7 @@ void McpServer::ExecuteNetworkCapture(
   if (*action == "start") {
     // Network.enable: 네트워크 이벤트 수신 시작.
     // 내부 CDP 세션이므로 노란 디버그 배너가 표시되지 않음.
-    base::Value::Dict cdp_params;
+    base::DictValue cdp_params;
     // maxTotalBufferSize: 네트워크 버퍼 크기 (10MB)
     cdp_params.Set("maxTotalBufferSize", 10 * 1024 * 1024);
     cdp_params.Set("maxResourceBufferSize", 5 * 1024 * 1024);
@@ -1413,7 +1442,7 @@ void McpServer::ExecuteNetworkCapture(
         std::move(cdp_params),
         base::BindOnce(
             [](base::OnceCallback<void(base::Value)> cb,
-               std::optional<base::Value::Dict>,
+               std::optional<base::DictValue>,
                const std::string& error) {
               if (!error.empty()) {
                 std::move(cb).Run(
@@ -1427,10 +1456,10 @@ void McpServer::ExecuteNetworkCapture(
     // Network.disable: 네트워크 이벤트 수신 중지
     session->SendCdpCommand(
         "Network.disable",
-        base::Value::Dict(),
+        base::DictValue(),
         base::BindOnce(
             [](base::OnceCallback<void(base::Value)> cb,
-               std::optional<base::Value::Dict>,
+               std::optional<base::DictValue>,
                const std::string& error) {
               if (!error.empty()) {
                 std::move(cb).Run(
@@ -1447,7 +1476,7 @@ void McpServer::ExecuteNetworkCapture(
 }
 
 void McpServer::ExecuteNetworkRequests(
-    const base::Value::Dict& params,
+    const base::DictValue& params,
     base::OnceCallback<void(base::Value)> callback) {
   McpSession* session = GetActiveSession();
   if (!session) {
@@ -1464,7 +1493,7 @@ void McpServer::ExecuteNetworkRequests(
   std::move(callback).Run(MakeTextResult(json_output));
 }
 
-void McpServer::ExecuteTabs(const base::Value::Dict& params,
+void McpServer::ExecuteTabs(const base::DictValue& params,
                              base::OnceCallback<void(base::Value)> callback) {
   // 탭 관리는 TabStripModel API를 직접 사용하므로 CDP 불필요.
   // 실제 구현에서는 TabStripModel* 참조가 필요함.
@@ -1476,25 +1505,25 @@ void McpServer::ExecuteTabs(const base::Value::Dict& params,
 
   if (*action == "list") {
     // 현재 열린 모든 WebContents 목록 반환
-    base::Value::List tabs_list;
+    base::ListValue tabs_list;
 
     // DevToolsAgentHost::GetAll()로 모든 열린 탭의 에이전트 호스트 조회
     content::DevToolsAgentHost::List all_hosts =
-        content::DevToolsAgentHost::GetOrCreateAll();
+        content::DevToolsAgentHost::GetAll();
 
     int tab_id = 0;
     for (const auto& host : all_hosts) {
       if (host->GetType() != content::DevToolsAgentHost::kTypePage) {
         continue;
       }
-      base::Value::Dict tab_info;
+      base::DictValue tab_info;
       tab_info.Set("id", tab_id++);
       tab_info.Set("url", host->GetURL().spec());
       tab_info.Set("title", host->GetTitle());
       tabs_list.Append(std::move(tab_info));
     }
 
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("tabs", std::move(tabs_list));
     std::move(callback).Run(base::Value(std::move(result)));
 
@@ -1518,9 +1547,9 @@ void McpServer::ExecuteTabs(const base::Value::Dict& params,
 }
 
 void McpServer::ExecuteBrowserInfo(
-    const base::Value::Dict& params,
+    const base::DictValue& params,
     base::OnceCallback<void(base::Value)> callback) {
-  base::Value::Dict info;
+  base::DictValue info;
 
   // 브라우저 버전 정보
   // 실제 구현: version_info::GetVersionNumber()
@@ -1531,7 +1560,6 @@ void McpServer::ExecuteBrowserInfo(
   if (active_web_contents_) {
     auto it = sessions_.find(active_web_contents_);
     if (it != sessions_.end()) {
-      McpSession* session = it->second.get();
       // 실제 구현: web_contents->GetVisibleURL().spec()
       info.Set("activeTabUrl", "https://example.com");
       info.Set("activeTabTitle", "Active Tab");
@@ -1540,7 +1568,7 @@ void McpServer::ExecuteBrowserInfo(
 
   // 열린 탭 수: DevToolsAgentHost::GetAll()로 조회
   content::DevToolsAgentHost::List all_hosts =
-      content::DevToolsAgentHost::GetOrCreateAll();
+      content::DevToolsAgentHost::GetAll();
   int page_count = 0;
   for (const auto& host : all_hosts) {
     if (host->GetType() == content::DevToolsAgentHost::kTypePage) {
@@ -1564,14 +1592,14 @@ void McpServer::ExecuteBrowserInfo(
 base::Value McpServer::MakeTextResult(const std::string& text) {
   // MCP tools/call 성공 응답 포맷:
   // {"content": [{"type": "text", "text": "..."}]}
-  base::Value::Dict content_item;
+  base::DictValue content_item;
   content_item.Set("type", "text");
   content_item.Set("text", text);
 
-  base::Value::List content_list;
+  base::ListValue content_list;
   content_list.Append(std::move(content_item));
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("content", std::move(content_list));
   return base::Value(std::move(result));
 }
@@ -1580,14 +1608,14 @@ base::Value McpServer::MakeTextResult(const std::string& text) {
 base::Value McpServer::MakeErrorResult(const std::string& error_message) {
   // MCP tools/call 오류 응답 포맷:
   // {"isError": true, "content": [{"type": "text", "text": "오류 메시지"}]}
-  base::Value::Dict content_item;
+  base::DictValue content_item;
   content_item.Set("type", "text");
   content_item.Set("text", error_message);
 
-  base::Value::List content_list;
+  base::ListValue content_list;
   content_list.Append(std::move(content_item));
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("isError", true);
   result.Set("content", std::move(content_list));
   return base::Value(std::move(result));

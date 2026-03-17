@@ -40,8 +40,8 @@ class WindowTool : public McpTool {
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
-  void Execute(const base::Value::Dict& arguments,
+  base::DictValue input_schema() const override;
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 
@@ -50,7 +50,7 @@ class WindowTool : public McpTool {
   // windowId를 모르는 경우 Browser.getWindowForTarget으로 먼저 조회한다.
   void ExecuteWithWindowId(int window_id,
                            const std::string& action,
-                           const base::Value::Dict& arguments,
+                           const base::DictValue& arguments,
                            McpSession* session,
                            base::OnceCallback<void(base::Value)> callback);
 
@@ -58,7 +58,7 @@ class WindowTool : public McpTool {
   // 응답에서 windowId를 추출하여 ExecuteWithWindowId를 호출한다.
   void OnGetWindowForTarget(const std::string& action,
                             // arguments를 복사해 캡처한다.
-                            base::Value::Dict arguments_copy,
+                            base::DictValue arguments_copy,
                             McpSession* session,
                             base::OnceCallback<void(base::Value)> callback,
                             base::Value response);

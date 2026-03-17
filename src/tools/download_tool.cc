@@ -13,6 +13,9 @@
 
 namespace mcp {
 
+DownloadTool::DownloadTool() = default;
+DownloadTool::~DownloadTool() = default;
+
 std::string DownloadTool::name() const {
   return "download";
 }
@@ -21,11 +24,11 @@ std::string DownloadTool::description() const {
   return "파일 다운로드 관리 (시작, 모니터링, 경로 설정)";
 }
 
-base::Value::Dict DownloadTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue DownloadTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // action: 수행할 다운로드 작업 종류
   // start    - 새 다운로드 시작
@@ -33,9 +36,9 @@ base::Value::Dict DownloadTool::input_schema() const {
   // cancel   - 진행 중인 다운로드 취소
   // setPath  - 전역 다운로드 저장 경로 변경
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "string");
-    base::Value::List enums;
+    base::ListValue enums;
     enums.Append("start");
     enums.Append("list");
     enums.Append("cancel");
@@ -49,7 +52,7 @@ base::Value::Dict DownloadTool::input_schema() const {
 
   // url: 다운로드할 파일 URL (action=start 시 필수)
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "string");
     prop.Set("description", "다운로드할 파일 URL (action=start 시 필수)");
     properties.Set("url", std::move(prop));
@@ -59,7 +62,7 @@ base::Value::Dict DownloadTool::input_schema() const {
   // start  : 파일명까지 포함한 전체 경로 또는 디렉토리 경로
   // setPath: 다운로드 기본 저장 디렉토리
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "string");
     prop.Set("description",
              "로컬 저장 경로 (action=start 시 선택, action=setPath 시 필수). "
@@ -69,7 +72,7 @@ base::Value::Dict DownloadTool::input_schema() const {
 
   // downloadId: 다운로드 ID (action=cancel 시 필수)
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "number");
     prop.Set("description", "대상 다운로드 ID (action=cancel 시 필수)");
     properties.Set("downloadId", std::move(prop));
@@ -77,19 +80,19 @@ base::Value::Dict DownloadTool::input_schema() const {
 
   schema.Set("properties", std::move(properties));
 
-  base::Value::List required;
+  base::ListValue required;
   required.Append("action");
   schema.Set("required", std::move(required));
 
   return schema;
 }
 
-void DownloadTool::Execute(const base::Value::Dict& arguments,
+void DownloadTool::Execute(const base::DictValue& arguments,
                            McpSession* session,
                            base::OnceCallback<void(base::Value)> callback) {
   const std::string* action_ptr = arguments.FindString("action");
   if (!action_ptr) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "action 파라미터가 필요합니다");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
@@ -101,7 +104,7 @@ void DownloadTool::Execute(const base::Value::Dict& arguments,
   if (action == "start") {
     const std::string* url_ptr = arguments.FindString("url");
     if (!url_ptr || url_ptr->empty()) {
-      base::Value::Dict err;
+      base::DictValue err;
       err.Set("error", "start 액션에는 url 파라미터가 필요합니다");
       std::move(callback).Run(base::Value(std::move(err)));
       return;
@@ -116,7 +119,7 @@ void DownloadTool::Execute(const base::Value::Dict& arguments,
   } else if (action == "cancel") {
     std::optional<int> id_opt = arguments.FindInt("downloadId");
     if (!id_opt.has_value()) {
-      base::Value::Dict err;
+      base::DictValue err;
       err.Set("error", "cancel 액션에는 downloadId 파라미터가 필요합니다");
       std::move(callback).Run(base::Value(std::move(err)));
       return;
@@ -126,7 +129,7 @@ void DownloadTool::Execute(const base::Value::Dict& arguments,
   } else if (action == "setPath") {
     const std::string* path_ptr = arguments.FindString("savePath");
     if (!path_ptr || path_ptr->empty()) {
-      base::Value::Dict err;
+      base::DictValue err;
       err.Set("error", "setPath 액션에는 savePath 파라미터가 필요합니다");
       std::move(callback).Run(base::Value(std::move(err)));
       return;
@@ -134,7 +137,7 @@ void DownloadTool::Execute(const base::Value::Dict& arguments,
     ExecuteSetPath(*path_ptr, session, std::move(callback));
 
   } else {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "알 수 없는 action: " + action);
     std::move(callback).Run(base::Value(std::move(err)));
   }
@@ -153,7 +156,7 @@ void DownloadTool::ExecuteStart(const std::string& url,
   // behavior="allow": 다운로드 파일을 자동으로 downloadPath에 저장.
   // downloadPath: 디렉토리 경로여야 하므로, save_path에 파일명이 포함되어 있으면
   //               dirname만 추출하여 사용한다.
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("behavior", "allow");
 
   if (!save_path.empty()) {
@@ -186,7 +189,7 @@ void DownloadTool::OnDownloadBehaviorSet(
   // setDownloadBehavior 결과는 오류가 있어도 계속 진행한다.
   // 일부 환경에서는 해당 명령을 지원하지 않을 수 있으므로 무시한다.
   if (response.is_dict()) {
-    const base::Value::Dict* err_dict = response.GetDict().FindDict("error");
+    const base::DictValue* err_dict = response.GetDict().FindDict("error");
     if (err_dict) {
       const std::string* msg = err_dict->FindString("message");
       LOG(WARNING) << "[DownloadTool] setDownloadBehavior 경고: "
@@ -246,7 +249,7 @@ void DownloadTool::OnDownloadBehaviorSet(
       "  }"
       "})()";
 
-  base::Value::Dict eval_params;
+  base::DictValue eval_params;
   eval_params.Set("expression", js_code);
   eval_params.Set("returnByValue", true);
 
@@ -262,18 +265,18 @@ void DownloadTool::OnDownloadTriggered(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
   if (!response.is_dict()) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error", "예상치 못한 CDP 응답 형식");
     std::move(callback).Run(base::Value(std::move(result)));
     return;
   }
 
-  const base::Value::Dict& dict = response.GetDict();
-  const base::Value::Dict* error_dict = dict.FindDict("error");
+  const base::DictValue& dict = response.GetDict();
+  const base::DictValue* error_dict = dict.FindDict("error");
   if (error_dict) {
     const std::string* msg = error_dict->FindString("message");
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error", msg ? *msg : "CDP 오류");
     std::move(callback).Run(base::Value(std::move(result)));
@@ -282,12 +285,12 @@ void DownloadTool::OnDownloadTriggered(
 
   LOG(INFO) << "[DownloadTool] 다운로드 트리거 완료";
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success", true);
   result.Set("message", "다운로드가 시작되었습니다");
 
   // Runtime.evaluate 결과에서 JS 반환값 추출
-  const base::Value::Dict* result_dict = dict.FindDict("result");
+  const base::DictValue* result_dict = dict.FindDict("result");
   if (result_dict) {
     const std::string* value_str = result_dict->FindString("value");
     if (value_str) {
@@ -328,7 +331,7 @@ void DownloadTool::ExecuteList(McpSession* session,
       "  }"
       "})()";
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("expression", js_code);
   params.Set("awaitPromise", true);
   params.Set("returnByValue", true);
@@ -375,7 +378,7 @@ void DownloadTool::ExecuteCancel(int download_id,
       "  }"
       "})()";
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("expression", js_code);
   params.Set("awaitPromise", true);
   params.Set("returnByValue", true);
@@ -398,7 +401,7 @@ void DownloadTool::ExecuteSetPath(const std::string& path,
   // Browser.setDownloadBehavior 로 전역 다운로드 저장 경로를 변경한다.
   // Page.setDownloadBehavior는 현재 탭에만 적용되지만,
   // Browser.setDownloadBehavior는 모든 탭에 전역 적용된다.
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("behavior", "allow");
   params.Set("downloadPath", path);
 
@@ -418,19 +421,19 @@ void DownloadTool::OnCdpActionResult(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
   if (!response.is_dict()) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error", "예상치 못한 CDP 응답 형식");
     std::move(callback).Run(base::Value(std::move(result)));
     return;
   }
 
-  const base::Value::Dict& dict = response.GetDict();
+  const base::DictValue& dict = response.GetDict();
 
-  const base::Value::Dict* error_dict = dict.FindDict("error");
+  const base::DictValue* error_dict = dict.FindDict("error");
   if (error_dict) {
     const std::string* msg = error_dict->FindString("message");
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error", msg ? *msg : "CDP 오류");
     std::move(callback).Run(base::Value(std::move(result)));
@@ -438,11 +441,11 @@ void DownloadTool::OnCdpActionResult(
   }
 
   // Runtime.evaluate 결과값이 있으면 data 필드로 포함
-  const base::Value::Dict* result_dict = dict.FindDict("result");
+  const base::DictValue* result_dict = dict.FindDict("result");
   if (result_dict) {
     const std::string* value_str = result_dict->FindString("value");
     if (value_str) {
-      base::Value::Dict result;
+      base::DictValue result;
       result.Set("success", true);
       result.Set("data", *value_str);
       std::move(callback).Run(base::Value(std::move(result)));
@@ -450,7 +453,7 @@ void DownloadTool::OnCdpActionResult(
     }
   }
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success", true);
   std::move(callback).Run(base::Value(std::move(result)));
 }

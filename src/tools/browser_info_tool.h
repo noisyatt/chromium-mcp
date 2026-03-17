@@ -36,15 +36,15 @@ class BrowserInfoTool : public McpTool {
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
-  void Execute(const base::Value::Dict& arguments,
+  base::DictValue input_schema() const override;
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 
  private:
-  // 활성 탭 정보를 수집하여 base::Value::Dict으로 반환.
+  // 활성 탭 정보를 수집하여 base::DictValue으로 반환.
   // 활성 브라우저가 없거나 탭이 없으면 빈 딕셔너리 반환.
-  static base::Value::Dict GetActiveTabInfo();
+  static base::DictValue GetActiveTabInfo();
 
   // 모든 Browser 창의 총 탭 수를 반환.
   static int GetTotalTabCount();

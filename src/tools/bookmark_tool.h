@@ -41,14 +41,14 @@ namespace mcp {
 //   - bookmarkId 는 int64 를 string 으로 직렬화한 값
 class BookmarkTool : public McpTool {
  public:
-  BookmarkTool() = default;
-  ~BookmarkTool() override = default;
+  BookmarkTool();
+  ~BookmarkTool() override;
 
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
-  void Execute(const base::Value::Dict& arguments,
+  base::DictValue input_schema() const override;
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 
@@ -98,14 +98,14 @@ class BookmarkTool : public McpTool {
   // string 형식의 ID를 int64_t 로 변환한다. 실패 시 -1 반환.
   static int64_t ParseNodeId(const std::string& id_str);
 
-  // BookmarkNode 를 base::Value::Dict 으로 직렬화한다.
+  // BookmarkNode 를 base::DictValue 으로 직렬화한다.
   //   recursive: true 이면 children 도 재귀적으로 포함
-  static base::Value::Dict SerializeNode(
+  static base::DictValue SerializeNode(
       const bookmarks::BookmarkNode* node,
       bool recursive = false);
 
-  // 노드 목록을 base::Value::List 로 직렬화한다.
-  static base::Value::List SerializeNodeList(
+  // 노드 목록을 base::ListValue 로 직렬화한다.
+  static base::ListValue SerializeNodeList(
       const std::vector<const bookmarks::BookmarkNode*>& nodes);
 
   base::WeakPtrFactory<BookmarkTool> weak_factory_{this};

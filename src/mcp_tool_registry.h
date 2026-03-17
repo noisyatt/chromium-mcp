@@ -30,13 +30,13 @@ class McpTool {
   virtual std::string description() const = 0;
 
   // JSON Schema 형식의 입력 파라미터 스키마
-  virtual base::Value::Dict input_schema() const = 0;
+  virtual base::DictValue input_schema() const = 0;
 
   // 도구 실행.
   // arguments: tools/call 요청의 arguments 필드
   // session: 현재 MCP 세션 (탭/브라우저 컨텍스트 접근용)
   // callback: 실행 완료 시 결과(base::Value)를 전달하는 콜백
-  virtual void Execute(const base::Value::Dict& arguments,
+  virtual void Execute(const base::DictValue& arguments,
                        McpSession* session,
                        base::OnceCallback<void(base::Value)> callback) = 0;
 };
@@ -78,7 +78,7 @@ class McpToolRegistry {
   // 도구를 찾지 못하면 MCP 에러 응답을 콜백으로 즉시 전달한다.
   void DispatchToolCall(
       const std::string& tool_name,
-      const base::Value::Dict& arguments,
+      const base::DictValue& arguments,
       McpSession* session,
       base::OnceCallback<void(base::Value)> callback) const;
 

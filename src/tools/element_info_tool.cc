@@ -41,6 +41,9 @@ struct ExtendedQueryContext : public ElementInfoTool::QueryContext {
   bool finalized = false;    // 이미 최종 결과를 반환했는지 여부
 };
 
+ElementInfoTool::QueryContext::QueryContext() = default;
+ElementInfoTool::QueryContext::~QueryContext() = default;
+
 ElementInfoTool::ElementInfoTool() = default;
 ElementInfoTool::~ElementInfoTool() = default;
 
@@ -52,24 +55,24 @@ std::string ElementInfoTool::description() const {
   return "요소의 상세 정보 조회 (속성, 스타일, 위치, 텍스트)";
 }
 
-base::Value::Dict ElementInfoTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue ElementInfoTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // selector: CSS 선택자 (필수)
-  base::Value::Dict selector_prop;
+  base::DictValue selector_prop;
   selector_prop.Set("type", "string");
   selector_prop.Set("description", "조회할 요소의 CSS 선택자 (필수)");
   properties.Set("selector", std::move(selector_prop));
 
   // properties: 조회할 항목 목록 (선택적, 미지정 시 전체)
-  base::Value::Dict props_prop;
+  base::DictValue props_prop;
   props_prop.Set("type", "array");
-  base::Value::Dict items_schema;
+  base::DictValue items_schema;
   items_schema.Set("type", "string");
-  base::Value::List items_enum;
+  base::ListValue items_enum;
   items_enum.Append(kPropAttributes);
   items_enum.Append(kPropComputedStyle);
   items_enum.Append(kPropBoundingBox);
@@ -89,20 +92,20 @@ base::Value::Dict ElementInfoTool::input_schema() const {
   schema.Set("properties", std::move(properties));
 
   // selector는 필수 파라미터
-  base::Value::List required;
+  base::ListValue required;
   required.Append("selector");
   schema.Set("required", std::move(required));
 
   return schema;
 }
 
-void ElementInfoTool::Execute(const base::Value::Dict& arguments,
+void ElementInfoTool::Execute(const base::DictValue& arguments,
                                McpSession* session,
                                base::OnceCallback<void(base::Value)> callback) {
   // selector 파라미터 추출 (필수)
   const std::string* selector_ptr = arguments.FindString("selector");
   if (!selector_ptr || selector_ptr->empty()) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "selector 파라미터가 필요합니다");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
@@ -114,7 +117,7 @@ void ElementInfoTool::Execute(const base::Value::Dict& arguments,
   ctx->session = session;
   ctx->callback = std::move(callback);
 
-  const base::Value::List* props_list = arguments.FindList("properties");
+  const base::ListValue* props_list = arguments.FindList("properties");
   if (props_list && !props_list->empty()) {
     // 지정된 property만 조회
     for (const auto& prop : *props_list) {
@@ -133,7 +136,7 @@ void ElementInfoTool::Execute(const base::Value::Dict& arguments,
             << " properties 수=" << ctx->properties.size();
 
   // 1단계: DOM.getDocument로 루트 nodeId 획득
-  base::Value::Dict get_doc_params;
+  base::DictValue get_doc_params;
   get_doc_params.Set("depth", 0);
   get_doc_params.Set("pierce", false);
 
@@ -146,30 +149,30 @@ void ElementInfoTool::Execute(const base::Value::Dict& arguments,
 void ElementInfoTool::OnGetDocumentResponse(std::shared_ptr<QueryContext> ctx,
                                              base::Value response) {
   if (!response.is_dict()) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "DOM.getDocument 응답 형식 오류");
     std::move(ctx->callback).Run(base::Value(std::move(err)));
     return;
   }
 
   // CDP 오류 확인
-  const base::Value::Dict* err_dict = response.GetDict().FindDict("error");
+  const base::DictValue* err_dict = response.GetDict().FindDict("error");
   if (err_dict) {
     const std::string* msg = err_dict->FindString("message");
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", msg ? *msg : "DOM.getDocument 실패");
     std::move(ctx->callback).Run(base::Value(std::move(err)));
     return;
   }
 
   // result 내부의 root 노드에서 nodeId 추출
-  const base::Value::Dict& dict = response.GetDict();
-  const base::Value::Dict* result_obj = dict.FindDict("result");
-  const base::Value::Dict* root =
+  const base::DictValue& dict = response.GetDict();
+  const base::DictValue* result_obj = dict.FindDict("result");
+  const base::DictValue* root =
       result_obj ? result_obj->FindDict("root") : dict.FindDict("root");
 
   if (!root) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "DOM 루트 노드를 찾을 수 없음");
     std::move(ctx->callback).Run(base::Value(std::move(err)));
     return;
@@ -177,14 +180,14 @@ void ElementInfoTool::OnGetDocumentResponse(std::shared_ptr<QueryContext> ctx,
 
   std::optional<int> root_node_id = root->FindInt("nodeId");
   if (!root_node_id) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "루트 nodeId 추출 실패");
     std::move(ctx->callback).Run(base::Value(std::move(err)));
     return;
   }
 
   // 2단계: DOM.querySelector로 selector에 해당하는 nodeId 획득
-  base::Value::Dict qs_params;
+  base::DictValue qs_params;
   qs_params.Set("nodeId", *root_node_id);
   qs_params.Set("selector", ctx->selector);
 
@@ -197,32 +200,32 @@ void ElementInfoTool::OnGetDocumentResponse(std::shared_ptr<QueryContext> ctx,
 void ElementInfoTool::OnQuerySelectorResponse(std::shared_ptr<QueryContext> ctx,
                                                base::Value response) {
   if (!response.is_dict()) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "DOM.querySelector 응답 형식 오류");
     std::move(ctx->callback).Run(base::Value(std::move(err)));
     return;
   }
 
-  const base::Value::Dict& dict = response.GetDict();
+  const base::DictValue& dict = response.GetDict();
 
   // CDP 오류 확인
-  const base::Value::Dict* err_dict = dict.FindDict("error");
+  const base::DictValue* err_dict = dict.FindDict("error");
   if (err_dict) {
     const std::string* msg = err_dict->FindString("message");
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", msg ? *msg : "DOM.querySelector 실패");
     std::move(ctx->callback).Run(base::Value(std::move(err)));
     return;
   }
 
   // result 내부의 nodeId 추출 (래핑 방식에 따라 위치가 다를 수 있음)
-  const base::Value::Dict* result_obj = dict.FindDict("result");
-  const base::Value::Dict* node_dict = result_obj ? result_obj : &dict;
+  const base::DictValue* result_obj = dict.FindDict("result");
+  const base::DictValue* node_dict = result_obj ? result_obj : &dict;
   std::optional<int> node_id = node_dict->FindInt("nodeId");
   if (!node_id || *node_id == 0) {
     LOG(WARNING) << "[ElementInfoTool] selector에 해당하는 요소 없음: "
                  << ctx->selector;
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "selector에 해당하는 요소를 찾을 수 없음: " + ctx->selector);
     std::move(ctx->callback).Run(base::Value(std::move(err)));
     return;
@@ -257,7 +260,7 @@ void ElementInfoTool::FetchProperties(std::shared_ptr<QueryContext> ctx) {
 
   if (ctx->properties.count(kPropAttributes)) {
     // DOM.getAttributes: HTML 속성 조회
-    base::Value::Dict params;
+    base::DictValue params;
     params.Set("nodeId", ctx->node_id);
     ctx->session->SendCdpCommand(
         "DOM.getAttributes", std::move(params),
@@ -274,7 +277,7 @@ void ElementInfoTool::FetchProperties(std::shared_ptr<QueryContext> ctx) {
 
   if (ctx->properties.count(kPropComputedStyle)) {
     // CSS.getComputedStyleForNode: 계산된 스타일 조회
-    base::Value::Dict params;
+    base::DictValue params;
     params.Set("nodeId", ctx->node_id);
     ctx->session->SendCdpCommand(
         "CSS.getComputedStyleForNode", std::move(params),
@@ -291,7 +294,7 @@ void ElementInfoTool::FetchProperties(std::shared_ptr<QueryContext> ctx) {
 
   if (ctx->properties.count(kPropBoundingBox)) {
     // DOM.getBoxModel: 위치/크기 조회
-    base::Value::Dict params;
+    base::DictValue params;
     params.Set("nodeId", ctx->node_id);
     ctx->session->SendCdpCommand(
         "DOM.getBoxModel", std::move(params),
@@ -312,7 +315,7 @@ void ElementInfoTool::FetchProperties(std::shared_ptr<QueryContext> ctx) {
                             const std::string& js_expr) {
     if (!ctx->properties.count(prop_name)) return;
 
-    base::Value::Dict params;
+    base::DictValue params;
     params.Set("expression", js_expr);
     params.Set("returnByValue", true);
     params.Set("awaitPromise", false);
@@ -379,15 +382,15 @@ void ElementInfoTool::OnGetAttributesResponse(std::shared_ptr<QueryContext> ctx,
   // 속성 이름과 값이 교대로 나열된 배열 형식이다.
   if (!response.is_dict()) return;
 
-  const base::Value::Dict& dict = response.GetDict();
-  const base::Value::Dict* result_obj = dict.FindDict("result");
-  const base::Value::Dict* data = result_obj ? result_obj : &dict;
-  const base::Value::List* attrs = data->FindList("attributes");
+  const base::DictValue& dict = response.GetDict();
+  const base::DictValue* result_obj = dict.FindDict("result");
+  const base::DictValue* data = result_obj ? result_obj : &dict;
+  const base::ListValue* attrs = data->FindList("attributes");
 
   if (!attrs) return;
 
   // 속성 배열을 {name: value} 딕셔너리로 변환
-  base::Value::Dict attrs_dict;
+  base::DictValue attrs_dict;
   for (size_t i = 0; i + 1 < attrs->size(); i += 2) {
     const auto& name = (*attrs)[i];
     const auto& value = (*attrs)[i + 1];
@@ -407,18 +410,18 @@ void ElementInfoTool::OnGetComputedStyleResponse(
   // {computedStyle: [{name: "...", value: "..."}, ...]}
   if (!response.is_dict()) return;
 
-  const base::Value::Dict& dict = response.GetDict();
-  const base::Value::Dict* result_obj = dict.FindDict("result");
-  const base::Value::Dict* data = result_obj ? result_obj : &dict;
-  const base::Value::List* style_list = data->FindList("computedStyle");
+  const base::DictValue& dict = response.GetDict();
+  const base::DictValue* result_obj = dict.FindDict("result");
+  const base::DictValue* data = result_obj ? result_obj : &dict;
+  const base::ListValue* style_list = data->FindList("computedStyle");
 
   if (!style_list) return;
 
   // 스타일 배열을 {property: value} 딕셔너리로 변환
-  base::Value::Dict style_dict;
+  base::DictValue style_dict;
   for (const auto& item : *style_list) {
     if (!item.is_dict()) continue;
-    const base::Value::Dict& item_dict = item.GetDict();
+    const base::DictValue& item_dict = item.GetDict();
     const std::string* name  = item_dict.FindString("name");
     const std::string* value = item_dict.FindString("value");
     if (name && value) {
@@ -437,14 +440,14 @@ void ElementInfoTool::OnGetBoxModelResponse(std::shared_ptr<QueryContext> ctx,
   // 각 배열은 4개 꼭짓점의 x,y 좌표 8개 값이다.
   if (!response.is_dict()) return;
 
-  const base::Value::Dict& dict = response.GetDict();
-  const base::Value::Dict* result_obj = dict.FindDict("result");
-  const base::Value::Dict* data = result_obj ? result_obj : &dict;
-  const base::Value::Dict* model = data->FindDict("model");
+  const base::DictValue& dict = response.GetDict();
+  const base::DictValue* result_obj = dict.FindDict("result");
+  const base::DictValue* data = result_obj ? result_obj : &dict;
+  const base::DictValue* model = data->FindDict("model");
 
   if (!model) return;
 
-  base::Value::Dict bbox;
+  base::DictValue bbox;
 
   // width, height는 직접 포함되어 있다.
   std::optional<int> width  = model->FindInt("width");
@@ -453,14 +456,14 @@ void ElementInfoTool::OnGetBoxModelResponse(std::shared_ptr<QueryContext> ctx,
   if (height.has_value()) bbox.Set("height", *height);
 
   // content 배열에서 좌상단 x, y 추출 (첫 번째 꼭짓점)
-  const base::Value::List* content = model->FindList("content");
+  const base::ListValue* content = model->FindList("content");
   if (content && content->size() >= 2) {
     bbox.Set("x", (*content)[0].GetDouble());
     bbox.Set("y", (*content)[1].GetDouble());
   }
 
   // border 배열도 함께 포함
-  const base::Value::List* border = model->FindList("border");
+  const base::ListValue* border = model->FindList("border");
   if (border && border->size() >= 8) {
     double x1 = (*border)[0].GetDouble();
     double y1 = (*border)[1].GetDouble();
@@ -484,13 +487,13 @@ void ElementInfoTool::OnRuntimeEvaluateResponse(
   // 응답 구조: {result: {type, value, ...}} 또는 래핑된 형태
   if (!response.is_dict()) return;
 
-  const base::Value::Dict& dict = response.GetDict();
-  const base::Value::Dict* result_obj = dict.FindDict("result");
-  const base::Value::Dict* eval_result = result_obj;
+  const base::DictValue& dict = response.GetDict();
+  const base::DictValue* result_obj = dict.FindDict("result");
+  const base::DictValue* eval_result = result_obj;
 
   // 한 번 더 래핑된 경우 처리
   if (eval_result) {
-    const base::Value::Dict* inner = eval_result->FindDict("result");
+    const base::DictValue* inner = eval_result->FindDict("result");
     if (inner) eval_result = inner;
   }
 

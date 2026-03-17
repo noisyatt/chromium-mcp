@@ -23,9 +23,9 @@ namespace {
 
 // MCP 성공 응답 Value 생성
 base::Value MakeSuccessResult(const std::string& message) {
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue item;
   item.Set("type", "text");
   item.Set("text", message);
   content.Append(std::move(item));
@@ -36,9 +36,9 @@ base::Value MakeSuccessResult(const std::string& message) {
 
 // MCP 에러 응답 Value 생성
 base::Value MakeErrorResult(const std::string& message) {
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue item;
   item.Set("type", "text");
   item.Set("text", message);
   content.Append(std::move(item));
@@ -53,7 +53,7 @@ base::Value MakeErrorResult(const std::string& message) {
 
 // CDP 응답에 "error" 키가 있는지 확인한다.
 bool HasCdpError(const base::Value& response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     return true;
   }
@@ -62,11 +62,11 @@ bool HasCdpError(const base::Value& response) {
 
 // CDP 응답에서 에러 메시지를 추출한다.
 std::string ExtractCdpErrorMessage(const base::Value& response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     return "CDP 응답이 Dict 형식이 아님";
   }
-  const base::Value::Dict* error = dict->FindDict("error");
+  const base::DictValue* error = dict->FindDict("error");
   if (!error) {
     return "알 수 없는 CDP 에러";
   }
@@ -99,12 +99,12 @@ int ButtonNameToButtons(const std::string& button_name) {
 // x, y     : 이벤트 발생 좌표 (픽셀)
 // button   : "none" / "left" / "right" / "middle"
 // buttons  : 현재 눌린 버튼 비트마스크 (0=없음, 1=left, 2=right, 4=middle)
-base::Value::Dict MakeMouseEventParams(const std::string& type,
+base::DictValue MakeMouseEventParams(const std::string& type,
                                        double x,
                                        double y,
                                        const std::string& button,
                                        int buttons) {
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("type", type);
   params.Set("x", x);
   params.Set("y", y);
@@ -146,17 +146,17 @@ std::string MouseTool::description() const {
          "steps 파라미터로 이동 단계 수를 조절할 수 있습니다.";
 }
 
-base::Value::Dict MouseTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue MouseTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // action: 동작 유형 (move / hover / drag)
-  base::Value::Dict action_prop;
+  base::DictValue action_prop;
   action_prop.Set("type", "string");
   {
-    base::Value::List action_enum;
+    base::ListValue action_enum;
     action_enum.Append("move");
     action_enum.Append("hover");
     action_enum.Append("drag");
@@ -172,7 +172,7 @@ base::Value::Dict MouseTool::input_schema() const {
   properties.Set("action", std::move(action_prop));
 
   // x: 목표 X 좌표 (move/hover 도착점, drag 끝점)
-  base::Value::Dict x_prop;
+  base::DictValue x_prop;
   x_prop.Set("type", "number");
   x_prop.Set("description",
              "목표 X 좌표 (픽셀). "
@@ -180,7 +180,7 @@ base::Value::Dict MouseTool::input_schema() const {
   properties.Set("x", std::move(x_prop));
 
   // y: 목표 Y 좌표 (move/hover 도착점, drag 끝점)
-  base::Value::Dict y_prop;
+  base::DictValue y_prop;
   y_prop.Set("type", "number");
   y_prop.Set("description",
              "목표 Y 좌표 (픽셀). "
@@ -188,7 +188,7 @@ base::Value::Dict MouseTool::input_schema() const {
   properties.Set("y", std::move(y_prop));
 
   // startX: 이동/드래그 시작 X 좌표
-  base::Value::Dict start_x_prop;
+  base::DictValue start_x_prop;
   start_x_prop.Set("type", "number");
   start_x_prop.Set("description",
                    "이동 시작 X 좌표 (픽셀). "
@@ -196,7 +196,7 @@ base::Value::Dict MouseTool::input_schema() const {
   properties.Set("startX", std::move(start_x_prop));
 
   // startY: 이동/드래그 시작 Y 좌표
-  base::Value::Dict start_y_prop;
+  base::DictValue start_y_prop;
   start_y_prop.Set("type", "number");
   start_y_prop.Set("description",
                    "이동 시작 Y 좌표 (픽셀). "
@@ -204,7 +204,7 @@ base::Value::Dict MouseTool::input_schema() const {
   properties.Set("startY", std::move(start_y_prop));
 
   // steps: 보간 단계 수
-  base::Value::Dict steps_prop;
+  base::DictValue steps_prop;
   steps_prop.Set("type", "number");
   steps_prop.Set("default", 10);
   steps_prop.Set("description",
@@ -213,10 +213,10 @@ base::Value::Dict MouseTool::input_schema() const {
   properties.Set("steps", std::move(steps_prop));
 
   // button: drag 시 사용할 마우스 버튼 (기본값: left)
-  base::Value::Dict button_prop;
+  base::DictValue button_prop;
   button_prop.Set("type", "string");
   {
-    base::Value::List button_enum;
+    base::ListValue button_enum;
     button_enum.Append("left");
     button_enum.Append("right");
     button_enum.Append("middle");
@@ -231,7 +231,7 @@ base::Value::Dict MouseTool::input_schema() const {
   schema.Set("properties", std::move(properties));
 
   // action, x, y는 필수
-  base::Value::List required;
+  base::ListValue required;
   required.Append("action");
   required.Append("x");
   required.Append("y");
@@ -241,7 +241,7 @@ base::Value::Dict MouseTool::input_schema() const {
 }
 
 // Execute: action 파라미터를 읽어 적절한 내부 메서드로 분기한다.
-void MouseTool::Execute(const base::Value::Dict& arguments,
+void MouseTool::Execute(const base::DictValue& arguments,
                         McpSession* session,
                         base::OnceCallback<void(base::Value)> callback) {
   const std::string* action = arguments.FindString("action");

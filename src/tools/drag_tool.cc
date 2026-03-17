@@ -19,9 +19,9 @@ namespace {
 
 // MCP 성공 응답 Value 생성
 base::Value MakeSuccessResult(const std::string& message) {
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue item;
   item.Set("type", "text");
   item.Set("text", message);
   content.Append(std::move(item));
@@ -32,9 +32,9 @@ base::Value MakeSuccessResult(const std::string& message) {
 
 // MCP 에러 응답 Value 생성
 base::Value MakeErrorResult(const std::string& message) {
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue item;
   item.Set("type", "text");
   item.Set("text", message);
   content.Append(std::move(item));
@@ -45,7 +45,7 @@ base::Value MakeErrorResult(const std::string& message) {
 
 // CDP 응답에 "error" 키가 있는지 확인한다.
 bool HasCdpError(const base::Value& response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     return true;
   }
@@ -54,11 +54,11 @@ bool HasCdpError(const base::Value& response) {
 
 // CDP 응답에서 에러 메시지를 추출한다.
 std::string ExtractCdpErrorMessage(const base::Value& response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     return "CDP 응답이 Dict 형식이 아님";
   }
-  const base::Value::Dict* error = dict->FindDict("error");
+  const base::DictValue* error = dict->FindDict("error");
   if (!error) {
     return "알 수 없는 CDP 에러";
   }
@@ -71,9 +71,9 @@ std::string ExtractCdpErrorMessage(const base::Value& response) {
 
 // DOM.getDocument 응답에서 rootNodeId를 추출한다.
 int ExtractRootNodeId(const base::Value& response) {
-  const base::Value::Dict* dict = response.GetIfDict();
-  const base::Value::Dict* result = dict ? dict->FindDict("result") : nullptr;
-  const base::Value::Dict* root = result ? result->FindDict("root") : nullptr;
+  const base::DictValue* dict = response.GetIfDict();
+  const base::DictValue* result = dict ? dict->FindDict("result") : nullptr;
+  const base::DictValue* root = result ? result->FindDict("root") : nullptr;
   if (!root) {
     return -1;
   }
@@ -83,11 +83,11 @@ int ExtractRootNodeId(const base::Value& response) {
 
 // DOM.querySelector 응답에서 nodeId를 추출한다.
 int ExtractNodeId(const base::Value& response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     return -1;
   }
-  const base::Value::Dict* result = dict->FindDict("result");
+  const base::DictValue* result = dict->FindDict("result");
   if (!result) {
     return -1;
   }
@@ -99,19 +99,19 @@ int ExtractNodeId(const base::Value& response) {
 bool ExtractBoxModelCenter(const base::Value& response,
                            double* out_x,
                            double* out_y) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     return false;
   }
-  const base::Value::Dict* result = dict->FindDict("result");
+  const base::DictValue* result = dict->FindDict("result");
   if (!result) {
     return false;
   }
-  const base::Value::Dict* model = result->FindDict("model");
+  const base::DictValue* model = result->FindDict("model");
   if (!model) {
     return false;
   }
-  const base::Value::List* content = model->FindList("content");
+  const base::ListValue* content = model->FindList("content");
   if (!content || content->size() < 8) {
     return false;
   }
@@ -132,12 +132,12 @@ double Lerp(double start, double end, double t) {
 }
 
 // Input.dispatchMouseEvent 파라미터 Dict 생성
-base::Value::Dict MakeMouseEventParams(const std::string& type,
+base::DictValue MakeMouseEventParams(const std::string& type,
                                        double x,
                                        double y,
                                        const std::string& button,
                                        int buttons) {
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("type", type);
   params.Set("x", x);
   params.Set("y", y);
@@ -168,14 +168,14 @@ std::string DragTool::description() const {
          "startX/startY, endX/endY로 좌표를 직접 지정할 수 있습니다.";
 }
 
-base::Value::Dict DragTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue DragTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // startSelector: 드래그 시작 요소의 CSS 셀렉터
-  base::Value::Dict start_selector_prop;
+  base::DictValue start_selector_prop;
   start_selector_prop.Set("type", "string");
   start_selector_prop.Set("description",
                            "드래그를 시작할 요소의 CSS 셀렉터. "
@@ -183,7 +183,7 @@ base::Value::Dict DragTool::input_schema() const {
   properties.Set("startSelector", std::move(start_selector_prop));
 
   // endSelector: 드롭 대상 요소의 CSS 셀렉터
-  base::Value::Dict end_selector_prop;
+  base::DictValue end_selector_prop;
   end_selector_prop.Set("type", "string");
   end_selector_prop.Set("description",
                          "드래그를 끝낼(드롭할) 요소의 CSS 셀렉터. "
@@ -191,31 +191,31 @@ base::Value::Dict DragTool::input_schema() const {
   properties.Set("endSelector", std::move(end_selector_prop));
 
   // startX: 드래그 시작 X 좌표
-  base::Value::Dict start_x_prop;
+  base::DictValue start_x_prop;
   start_x_prop.Set("type", "number");
   start_x_prop.Set("description", "드래그 시작 X 좌표 (픽셀). startSelector가 없을 때 사용.");
   properties.Set("startX", std::move(start_x_prop));
 
   // startY: 드래그 시작 Y 좌표
-  base::Value::Dict start_y_prop;
+  base::DictValue start_y_prop;
   start_y_prop.Set("type", "number");
   start_y_prop.Set("description", "드래그 시작 Y 좌표 (픽셀). startSelector가 없을 때 사용.");
   properties.Set("startY", std::move(start_y_prop));
 
   // endX: 드래그 끝 X 좌표
-  base::Value::Dict end_x_prop;
+  base::DictValue end_x_prop;
   end_x_prop.Set("type", "number");
   end_x_prop.Set("description", "드래그 끝(드롭) X 좌표 (픽셀). endSelector가 없을 때 사용.");
   properties.Set("endX", std::move(end_x_prop));
 
   // endY: 드래그 끝 Y 좌표
-  base::Value::Dict end_y_prop;
+  base::DictValue end_y_prop;
   end_y_prop.Set("type", "number");
   end_y_prop.Set("description", "드래그 끝(드롭) Y 좌표 (픽셀). endSelector가 없을 때 사용.");
   properties.Set("endY", std::move(end_y_prop));
 
   // steps: 이동 단계 수 (선형 보간 횟수)
-  base::Value::Dict steps_prop;
+  base::DictValue steps_prop;
   steps_prop.Set("type", "number");
   steps_prop.Set("default", 10);
   steps_prop.Set("description",
@@ -226,13 +226,13 @@ base::Value::Dict DragTool::input_schema() const {
   schema.Set("properties", std::move(properties));
 
   // 모든 파라미터 선택적 (런타임 검증)
-  base::Value::List required;
+  base::ListValue required;
   schema.Set("required", std::move(required));
 
   return schema;
 }
 
-void DragTool::Execute(const base::Value::Dict& arguments,
+void DragTool::Execute(const base::DictValue& arguments,
                        McpSession* session,
                        base::OnceCallback<void(base::Value)> callback) {
   // steps 파라미터 (기본값: 10, 최소: 1)
@@ -410,7 +410,7 @@ void DragTool::GetDocumentRootForStart(
     int steps,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("depth", 0);
 
   session->SendCdpCommand(
@@ -440,7 +440,7 @@ void DragTool::OnGetDocumentRootForStart(
     return;
   }
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("nodeId", root_node_id);
   params.Set("selector", start_selector);
 
@@ -470,7 +470,7 @@ void DragTool::OnQuerySelectorStart(
     return;
   }
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("nodeId", node_id);
 
   session->SendCdpCommand(
@@ -506,7 +506,7 @@ void DragTool::OnGetBoxModelStart(
   // rootNodeId=1 (document root의 일반적인 값)로 querySelector를 시도
   // 실제 구현에서는 root_node_id를 멤버 변수로 캐싱하는 것이 바람직하나
   // 여기서는 depth=0으로 다시 getDocument를 호출하는 방식 사용
-  base::Value::Dict doc_params;
+  base::DictValue doc_params;
   doc_params.Set("depth", 0);
 
   // start_x, start_y를 OnQuerySelectorEnd에 전달하기 위해 BindOnce 활용
@@ -526,7 +526,7 @@ void DragTool::OnGetBoxModelStart(
                   MakeErrorResult("DOM 루트 노드 ID를 획득할 수 없습니다."));
               return;
             }
-            base::Value::Dict qs_params;
+            base::DictValue qs_params;
             qs_params.Set("nodeId", root_node_id);
             qs_params.Set("selector", end_sel);
             sess->SendCdpCommand(
@@ -535,7 +535,7 @@ void DragTool::OnGetBoxModelStart(
                                self->weak_factory_.GetWeakPtr(),
                                sx, sy, st, sess, std::move(cb)));
           },
-          weak_factory_.GetWeakPtr(),
+          base::Unretained(this),
           end_selector, start_x, start_y, steps, session,
           std::move(callback)));
 }
@@ -560,7 +560,7 @@ void DragTool::OnQuerySelectorEnd(
     return;
   }
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("nodeId", node_id);
 
   session->SendCdpCommand(

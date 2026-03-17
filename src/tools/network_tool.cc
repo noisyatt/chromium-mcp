@@ -8,11 +8,19 @@
 
 #include "base/json/json_writer.h"
 #include "base/logging.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
+#include "chrome/browser/mcp/mcp_session.h"
 #include "chrome/browser/mcp/mcp_tool_registry.h"
 
 namespace mcp {
+
+// CapturedRequest out-of-line 구현 (chromium-style 요구사항)
+CapturedRequest::CapturedRequest() = default;
+CapturedRequest::~CapturedRequest() = default;
+CapturedRequest::CapturedRequest(CapturedRequest&&) = default;
+CapturedRequest& CapturedRequest::operator=(CapturedRequest&&) = default;
 
 // ============================================================================
 // NetworkCaptureTool 구현
@@ -33,18 +41,18 @@ std::string NetworkCaptureTool::description() const {
          "내부 CDP 세션을 사용하므로 노란 배너가 표시되지 않습니다.";
 }
 
-base::Value::Dict NetworkCaptureTool::input_schema() const {
+base::DictValue NetworkCaptureTool::input_schema() const {
   // JSON Schema: action, includeResponseBody, filter 파라미터 정의
-  base::Value::Dict schema;
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // action: 필수 파라미터 (start 또는 stop)
   {
-    base::Value::Dict action_prop;
+    base::DictValue action_prop;
     action_prop.Set("type", "string");
-    base::Value::List action_enum;
+    base::ListValue action_enum;
     action_enum.Append("start");
     action_enum.Append("stop");
     action_prop.Set("enum", std::move(action_enum));
@@ -54,7 +62,7 @@ base::Value::Dict NetworkCaptureTool::input_schema() const {
 
   // includeResponseBody: 응답 바디 자동 수집 여부 (기본값 false)
   {
-    base::Value::Dict body_prop;
+    base::DictValue body_prop;
     body_prop.Set("type", "boolean");
     body_prop.Set("description",
                   "true이면 각 요청 완료 후 Network.getResponseBody를 자동 "
@@ -64,21 +72,21 @@ base::Value::Dict NetworkCaptureTool::input_schema() const {
 
   // filter: URL 패턴 및 리소스 타입 필터
   {
-    base::Value::Dict filter_prop;
+    base::DictValue filter_prop;
     filter_prop.Set("type", "object");
 
-    base::Value::Dict filter_props;
+    base::DictValue filter_props;
 
-    base::Value::Dict url_pattern_prop;
+    base::DictValue url_pattern_prop;
     url_pattern_prop.Set("type", "string");
     url_pattern_prop.Set("description",
                          "캡처할 URL 패턴. * 와일드카드 지원. "
                          "비어있으면 전체 URL 캡처.");
     filter_props.Set("urlPattern", std::move(url_pattern_prop));
 
-    base::Value::Dict resource_types_prop;
+    base::DictValue resource_types_prop;
     resource_types_prop.Set("type", "array");
-    base::Value::Dict rt_items;
+    base::DictValue rt_items;
     rt_items.Set("type", "string");
     resource_types_prop.Set("items", std::move(rt_items));
     resource_types_prop.Set("description",
@@ -94,7 +102,7 @@ base::Value::Dict NetworkCaptureTool::input_schema() const {
   schema.Set("properties", std::move(properties));
 
   // action만 필수
-  base::Value::List required;
+  base::ListValue required;
   required.Append("action");
   schema.Set("required", std::move(required));
 
@@ -102,17 +110,17 @@ base::Value::Dict NetworkCaptureTool::input_schema() const {
 }
 
 void NetworkCaptureTool::Execute(
-    const base::Value::Dict& arguments,
+    const base::DictValue& arguments,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   // action 파라미터 추출
   const std::string* action = arguments.FindString("action");
   if (!action || action->empty()) {
     LOG(WARNING) << "[MCP][NetworkCapture] action 파라미터 누락";
-    base::Value::Dict error_result;
+    base::DictValue error_result;
     error_result.Set("isError", true);
-    base::Value::List content;
-    base::Value::Dict content_item;
+    base::ListValue content;
+    base::DictValue content_item;
     content_item.Set("type", "text");
     content_item.Set("text", "오류: action 파라미터가 필요합니다 (start 또는 stop)");
     content.Append(std::move(content_item));
@@ -131,17 +139,17 @@ void NetworkCaptureTool::Execute(
     }
 
     // filter 파라미터 (선택적)
-    const base::Value::Dict* filter = arguments.FindDict("filter");
+    const base::DictValue* filter = arguments.FindDict("filter");
 
     HandleStart(include_body, filter, session, std::move(callback));
   } else if (*action == "stop") {
     HandleStop(session, std::move(callback));
   } else {
     LOG(WARNING) << "[MCP][NetworkCapture] 알 수 없는 action: " << *action;
-    base::Value::Dict error_result;
+    base::DictValue error_result;
     error_result.Set("isError", true);
-    base::Value::List content;
-    base::Value::Dict content_item;
+    base::ListValue content;
+    base::DictValue content_item;
     content_item.Set("type", "text");
     content_item.Set("text", "오류: action은 'start' 또는 'stop'이어야 합니다");
     content.Append(std::move(content_item));
@@ -152,7 +160,7 @@ void NetworkCaptureTool::Execute(
 
 void NetworkCaptureTool::HandleStart(
     bool include_response_body,
-    const base::Value::Dict* filter,
+    const base::DictValue* filter,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   if (is_capturing_) {
@@ -174,7 +182,7 @@ void NetworkCaptureTool::HandleStart(
       LOG(INFO) << "[MCP][NetworkCapture] URL 필터 패턴: "
                 << url_filter_pattern_;
     }
-    const base::Value::List* resource_types =
+    const base::ListValue* resource_types =
         filter->FindList("resourceTypes");
     if (resource_types) {
       for (const auto& rt_val : *resource_types) {
@@ -192,7 +200,7 @@ void NetworkCaptureTool::HandleStart(
 
   // Network.enable CDP 명령으로 네트워크 이벤트 스트림 활성화
   // maxTotalBufferSize, maxResourceBufferSize는 0으로 설정해 제한 없음
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("maxTotalBufferSize", 0);
   params.Set("maxResourceBufferSize", 0);
 
@@ -209,17 +217,17 @@ void NetworkCaptureTool::OnNetworkEnabled(
     base::Value response) {
   // CDP 응답에 error 키가 있으면 실패
   if (response.is_dict()) {
-    const base::Value::Dict* error = response.GetDict().FindDict("error");
+    const base::DictValue* error = response.GetDict().FindDict("error");
     if (error) {
       const std::string* msg = error->FindString("message");
       std::string err_text =
           msg ? *msg : "Network.enable 실패 (알 수 없는 오류)";
       LOG(ERROR) << "[MCP][NetworkCapture] Network.enable 실패: " << err_text;
 
-      base::Value::Dict error_result;
+      base::DictValue error_result;
       error_result.Set("isError", true);
-      base::Value::List content;
-      base::Value::Dict content_item;
+      base::ListValue content;
+      base::DictValue content_item;
       content_item.Set("type", "text");
       content_item.Set("text", "네트워크 캡처 시작 실패: " + err_text);
       content.Append(std::move(content_item));
@@ -235,7 +243,7 @@ void NetworkCaptureTool::OnNetworkEnabled(
   // McpSession에 CDP 이벤트 수신 핸들러 등록.
   // Network.* 이벤트를 OnCdpEvent 로 라우팅한다.
   // RegisterCdpEventHandler 의 시그니처:
-  //   void(const std::string& event_name, const base::Value::Dict& params)
+  //   void(const std::string& event_name, const base::DictValue& params)
   session->RegisterCdpEventHandler(
       "Network.requestWillBeSent",
       base::BindRepeating(&NetworkCaptureTool::OnCdpEvent,
@@ -256,7 +264,7 @@ void NetworkCaptureTool::OnNetworkEnabled(
           [](base::WeakPtr<NetworkCaptureTool> self,
              base::WeakPtr<McpSession> weak_session,
              const std::string& /*event_name*/,
-             const base::Value::Dict& params) {
+             const base::DictValue& params) {
             if (!self) {
               return;
             }
@@ -268,9 +276,9 @@ void NetworkCaptureTool::OnNetworkEnabled(
   LOG(INFO) << "[MCP][NetworkCapture] 캡처 시작 완료. 이벤트 대기 중.";
 
   // 성공 응답 반환
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict content_item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue content_item;
   content_item.Set("type", "text");
   content_item.Set("text",
                    "네트워크 캡처가 시작되었습니다. "
@@ -286,10 +294,10 @@ void NetworkCaptureTool::HandleStop(
     base::OnceCallback<void(base::Value)> callback) {
   if (!is_capturing_) {
     LOG(WARNING) << "[MCP][NetworkCapture] 캡처가 시작되지 않았는데 stop 요청";
-    base::Value::Dict error_result;
+    base::DictValue error_result;
     error_result.Set("isError", true);
-    base::Value::List content;
-    base::Value::Dict content_item;
+    base::ListValue content;
+    base::DictValue content_item;
     content_item.Set("type", "text");
     content_item.Set("text",
                      "오류: 캡처가 진행 중이지 않습니다. "
@@ -310,7 +318,7 @@ void NetworkCaptureTool::HandleStop(
 
   // Network.disable CDP 명령으로 이벤트 스트림 비활성화
   session->SendCdpCommand(
-      "Network.disable", base::Value::Dict(),
+      "Network.disable", base::DictValue(),
       base::BindOnce(&NetworkCaptureTool::OnNetworkDisabled,
                      weak_factory_.GetWeakPtr(), std::move(callback)));
 }
@@ -322,7 +330,7 @@ void NetworkCaptureTool::OnNetworkDisabled(
 
   // CDP 응답에 error 키가 있어도 버퍼는 반환한다 (이미 수집된 데이터 손실 방지)
   if (response.is_dict()) {
-    const base::Value::Dict* error = response.GetDict().FindDict("error");
+    const base::DictValue* error = response.GetDict().FindDict("error");
     if (error) {
       const std::string* msg = error->FindString("message");
       LOG(WARNING) << "[MCP][NetworkCapture] Network.disable 경고: "
@@ -346,7 +354,7 @@ void NetworkCaptureTool::OnNetworkDisabled(
 }
 
 void NetworkCaptureTool::OnCdpEvent(const std::string& event_name,
-                                    const base::Value::Dict& event_params) {
+                                    const base::DictValue& event_params) {
   if (!is_capturing_) {
     return;
   }
@@ -363,7 +371,7 @@ void NetworkCaptureTool::OnCdpEvent(const std::string& event_name,
 }
 
 void NetworkCaptureTool::OnRequestWillBeSent(
-    const base::Value::Dict& params) {
+    const base::DictValue& params) {
   // requestId 추출 (필수)
   const std::string* request_id = params.FindString("requestId");
   if (!request_id) {
@@ -371,7 +379,7 @@ void NetworkCaptureTool::OnRequestWillBeSent(
   }
 
   // request 객체에서 URL, method 추출
-  const base::Value::Dict* request = params.FindDict("request");
+  const base::DictValue* request = params.FindDict("request");
   if (!request) {
     return;
   }
@@ -437,7 +445,7 @@ void NetworkCaptureTool::OnRequestWillBeSent(
 }
 
 void NetworkCaptureTool::OnResponseReceived(
-    const base::Value::Dict& params) {
+    const base::DictValue& params) {
   const std::string* request_id = params.FindString("requestId");
   if (!request_id) {
     return;
@@ -456,7 +464,7 @@ void NetworkCaptureTool::OnResponseReceived(
   }
 
   // response 객체에서 상태코드, mimeType, headers 추출
-  const base::Value::Dict* response = params.FindDict("response");
+  const base::DictValue* response = params.FindDict("response");
   if (!response) {
     return;
   }
@@ -477,14 +485,14 @@ void NetworkCaptureTool::OnResponseReceived(
   }
 
   // 응답 헤더 복사
-  const base::Value::Dict* headers = response->FindDict("headers");
+  const base::DictValue* headers = response->FindDict("headers");
   if (headers) {
     target->response_headers = headers->Clone();
   }
 }
 
 void NetworkCaptureTool::OnLoadingFinished(
-    const base::Value::Dict& params,
+    const base::DictValue& params,
     McpSession* session) {
   const std::string* request_id = params.FindString("requestId");
   if (!request_id) {
@@ -511,7 +519,7 @@ void NetworkCaptureTool::OnLoadingFinished(
 
   // includeResponseBody=true 이고 session이 있으면 응답 바디 요청
   if (include_response_body_ && session) {
-    base::Value::Dict body_params;
+    base::DictValue body_params;
     body_params.Set("requestId", *request_id);
 
     LOG(INFO) << "[MCP][NetworkCapture] 응답 바디 요청: " << *request_id;
@@ -542,7 +550,7 @@ void NetworkCaptureTool::OnResponseBodyFetched(
     return;
   }
 
-  const base::Value::Dict& result = response.GetDict();
+  const base::DictValue& result = response.GetDict();
 
   // error 키가 있으면 바디 수집 실패 (캐시 미스, 리소스 취소 등)
   if (result.FindDict("error")) {
@@ -627,10 +635,10 @@ bool NetworkCaptureTool::MatchesUrlPattern(const std::string& url,
 
 base::Value NetworkCaptureTool::SerializeRequests() const {
   // captured_requests_ 를 MCP tools/call 응답 형식으로 직렬화
-  base::Value::List requests_list;
+  base::ListValue requests_list;
 
   for (const auto& req : captured_requests_) {
-    base::Value::Dict req_dict;
+    base::DictValue req_dict;
     req_dict.Set("requestId", req.request_id);
     req_dict.Set("url", req.url);
     req_dict.Set("method", req.method);
@@ -651,7 +659,7 @@ base::Value NetworkCaptureTool::SerializeRequests() const {
   }
 
   // 결과를 JSON 문자열로 직렬화하여 content[].text 에 담아 반환
-  base::Value::Dict data;
+  base::DictValue data;
   data.Set("capturedCount",
            static_cast<int>(captured_requests_.size()));
   data.Set("requests", std::move(requests_list));
@@ -662,9 +670,9 @@ base::Value NetworkCaptureTool::SerializeRequests() const {
       base::JSONWriter::OPTIONS_PRETTY_PRINT,
       &json_str);
 
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict content_item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue content_item;
   content_item.Set("type", "text");
   content_item.Set("text", json_str);
   content.Append(std::move(content_item));
@@ -696,14 +704,14 @@ std::string NetworkRequestsTool::description() const {
          "정적 리소스를 결과에서 제외합니다.";
 }
 
-base::Value::Dict NetworkRequestsTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue NetworkRequestsTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // includeStatic: 정적 리소스 포함 여부 (기본값 false)
-  base::Value::Dict include_static_prop;
+  base::DictValue include_static_prop;
   include_static_prop.Set("type", "boolean");
   include_static_prop.Set("description",
                           "true이면 이미지, 폰트, 스타일시트, 미디어 등 "
@@ -716,7 +724,7 @@ base::Value::Dict NetworkRequestsTool::input_schema() const {
 }
 
 void NetworkRequestsTool::Execute(
-    const base::Value::Dict& arguments,
+    const base::DictValue& arguments,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   // includeStatic 파라미터 (기본값 false)
@@ -730,7 +738,7 @@ void NetworkRequestsTool::Execute(
   const std::vector<CapturedRequest>& all_requests =
       capture_tool_->captured_requests_;
 
-  base::Value::List requests_list;
+  base::ListValue requests_list;
   int filtered_count = 0;
 
   for (const auto& req : all_requests) {
@@ -740,7 +748,7 @@ void NetworkRequestsTool::Execute(
       continue;
     }
 
-    base::Value::Dict req_dict;
+    base::DictValue req_dict;
     req_dict.Set("requestId", req.request_id);
     req_dict.Set("url", req.url);
     req_dict.Set("method", req.method);
@@ -764,7 +772,7 @@ void NetworkRequestsTool::Execute(
             << filtered_count << "개)";
 
   // 결과 직렬화
-  base::Value::Dict data;
+  base::DictValue data;
   data.Set("total", static_cast<int>(all_requests.size()));
   data.Set("returned", static_cast<int>(requests_list.size()));
   data.Set("filteredStatic", filtered_count);
@@ -776,9 +784,9 @@ void NetworkRequestsTool::Execute(
       base::JSONWriter::OPTIONS_PRETTY_PRINT,
       &json_str);
 
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict content_item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue content_item;
   content_item.Set("type", "text");
   content_item.Set("text", json_str);
   content.Append(std::move(content_item));

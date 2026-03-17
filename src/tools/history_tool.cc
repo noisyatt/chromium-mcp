@@ -8,16 +8,22 @@
 
 #include "base/logging.h"
 #include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/mcp/mcp_session.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_types.h"
 #include "url/gurl.h"
 
 namespace mcp {
+
+HistoryTool::HistoryTool() = default;
+HistoryTool::~HistoryTool() = default;
 
 // -----------------------------------------------------------------------
 // McpTool 인터페이스 구현
@@ -31,17 +37,17 @@ std::string HistoryTool::description() const {
   return "브라우저 방문 기록 조회 및 삭제";
 }
 
-base::Value::Dict HistoryTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue HistoryTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict props;
+  base::DictValue props;
 
   // action: 수행할 작업 (필수)
   {
-    base::Value::Dict p;
+    base::DictValue p;
     p.Set("type", "string");
-    base::Value::List e;
+    base::ListValue e;
     e.Append("search");
     e.Append("delete");
     e.Append("deleteRange");
@@ -58,7 +64,7 @@ base::Value::Dict HistoryTool::input_schema() const {
 
   // query: 검색어 (action=search 시 사용)
   {
-    base::Value::Dict p;
+    base::DictValue p;
     p.Set("type", "string");
     p.Set("description",
           "검색 키워드 (action=search 에서 사용; 빈 문자열이면 최신 항목 반환)");
@@ -67,7 +73,7 @@ base::Value::Dict HistoryTool::input_schema() const {
 
   // maxResults: 최대 결과 수 (기본 50)
   {
-    base::Value::Dict p;
+    base::DictValue p;
     p.Set("type", "number");
     p.Set("description", "반환할 최대 결과 수 (기본값: 50)");
     p.Set("default", 50);
@@ -76,7 +82,7 @@ base::Value::Dict HistoryTool::input_schema() const {
 
   // startTime: 검색/삭제 시작 시간 (ISO 8601)
   {
-    base::Value::Dict p;
+    base::DictValue p;
     p.Set("type", "string");
     p.Set("description",
           "검색/삭제 시작 시간 (ISO 8601 형식, 예: 2024-01-01T00:00:00Z)");
@@ -85,7 +91,7 @@ base::Value::Dict HistoryTool::input_schema() const {
 
   // endTime: 검색/삭제 종료 시간 (ISO 8601)
   {
-    base::Value::Dict p;
+    base::DictValue p;
     p.Set("type", "string");
     p.Set("description",
           "검색/삭제 종료 시간 (ISO 8601 형식, 예: 2024-12-31T23:59:59Z)");
@@ -94,7 +100,7 @@ base::Value::Dict HistoryTool::input_schema() const {
 
   // url: 삭제할 특정 URL (action=delete 시 필수)
   {
-    base::Value::Dict p;
+    base::DictValue p;
     p.Set("type", "string");
     p.Set("description", "삭제할 URL (action=delete 시 필수)");
     props.Set("url", std::move(p));
@@ -102,7 +108,7 @@ base::Value::Dict HistoryTool::input_schema() const {
 
   schema.Set("properties", std::move(props));
 
-  base::Value::List required;
+  base::ListValue required;
   required.Append("action");
   schema.Set("required", std::move(required));
 
@@ -112,12 +118,12 @@ base::Value::Dict HistoryTool::input_schema() const {
 // -----------------------------------------------------------------------
 // Execute
 // -----------------------------------------------------------------------
-void HistoryTool::Execute(const base::Value::Dict& arguments,
+void HistoryTool::Execute(const base::DictValue& arguments,
                           McpSession* session,
                           base::OnceCallback<void(base::Value)> callback) {
   const std::string* action_ptr = arguments.FindString("action");
   if (!action_ptr) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "action 파라미터가 필요합니다");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
@@ -140,7 +146,7 @@ void HistoryTool::Execute(const base::Value::Dict& arguments,
   } else if (action == "delete") {
     const std::string* url = arguments.FindString("url");
     if (!url || url->empty()) {
-      base::Value::Dict err;
+      base::DictValue err;
       err.Set("error", "delete 액션에는 url 파라미터가 필요합니다");
       std::move(callback).Run(base::Value(std::move(err)));
       return;
@@ -151,7 +157,7 @@ void HistoryTool::Execute(const base::Value::Dict& arguments,
     const std::string* st = arguments.FindString("startTime");
     const std::string* et = arguments.FindString("endTime");
     if (!st || !et) {
-      base::Value::Dict err;
+      base::DictValue err;
       err.Set("error",
               "deleteRange 액션에는 startTime, endTime 파라미터가 필요합니다");
       std::move(callback).Run(base::Value(std::move(err)));
@@ -163,7 +169,7 @@ void HistoryTool::Execute(const base::Value::Dict& arguments,
     ExecuteDeleteAll(session, std::move(callback));
 
   } else {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "알 수 없는 action: " + action);
     std::move(callback).Run(base::Value(std::move(err)));
   }
@@ -182,7 +188,7 @@ void HistoryTool::ExecuteSearch(
 
   history::HistoryService* hs = GetHistoryService(session);
   if (!hs) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "HistoryService를 가져올 수 없습니다 (프로파일 오류)");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
@@ -222,7 +228,7 @@ void HistoryTool::ExecuteDelete(const std::string& url,
                                 base::OnceCallback<void(base::Value)> callback) {
   history::HistoryService* hs = GetHistoryService(session);
   if (!hs) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "HistoryService를 가져올 수 없습니다");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
@@ -230,7 +236,7 @@ void HistoryTool::ExecuteDelete(const std::string& url,
 
   GURL gurl(url);
   if (!gurl.is_valid()) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "유효하지 않은 URL: " + url);
     std::move(callback).Run(base::Value(std::move(err)));
     return;
@@ -241,9 +247,9 @@ void HistoryTool::ExecuteDelete(const std::string& url,
   // HistoryService::DeleteURL 은 동기적으로 삭제를 스케줄링한다.
   // 완료 통지가 필요하다면 HistoryObserver 를 사용해야 하지만,
   // 여기서는 호출 후 즉시 성공 응답을 반환한다.
-  hs->DeleteURL(gurl);
+  hs->DeleteURLs({gurl});
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success", true);
   result.Set("url", url);
   result.Set("message", "URL 방문 기록이 삭제 대기열에 추가되었습니다");
@@ -261,7 +267,7 @@ void HistoryTool::ExecuteDeleteRange(
 
   history::HistoryService* hs = GetHistoryService(session);
   if (!hs) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "HistoryService를 가져올 수 없습니다");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
@@ -271,13 +277,13 @@ void HistoryTool::ExecuteDeleteRange(
   base::Time t_end   = ParseIsoTime(end_time);
 
   if (t_start.is_null()) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "startTime 파싱 실패: " + start_time);
     std::move(callback).Run(base::Value(std::move(err)));
     return;
   }
   if (t_end.is_null()) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "endTime 파싱 실패: " + end_time);
     std::move(callback).Run(base::Value(std::move(err)));
     return;
@@ -290,12 +296,13 @@ void HistoryTool::ExecuteDeleteRange(
   // 빈 restrict_urls 집합 → 모든 URL 삭제
   hs->ExpireHistoryBetween(
       /*restrict_urls=*/{},
+      /*restrict_app_id=*/std::nullopt,
       t_start, t_end,
       /*user_initiated=*/true,
       base::BindOnce(
           [](base::OnceCallback<void(base::Value)> cb,
              const std::string& st, const std::string& et) {
-            base::Value::Dict result;
+            base::DictValue result;
             result.Set("success",   true);
             result.Set("startTime", st);
             result.Set("endTime",   et);
@@ -315,7 +322,7 @@ void HistoryTool::ExecuteDeleteAll(
 
   history::HistoryService* hs = GetHistoryService(session);
   if (!hs) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "HistoryService를 가져올 수 없습니다");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
@@ -326,11 +333,12 @@ void HistoryTool::ExecuteDeleteAll(
   // base::Time() ~ base::Time::Max() 범위를 삭제하면 전체 히스토리 삭제됨
   hs->ExpireHistoryBetween(
       /*restrict_urls=*/{},
+      /*restrict_app_id=*/std::nullopt,
       base::Time(), base::Time::Max(),
       /*user_initiated=*/true,
       base::BindOnce(
           [](base::OnceCallback<void(base::Value)> cb) {
-            base::Value::Dict result;
+            base::DictValue result;
             result.Set("success", true);
             result.Set("message", "전체 방문 기록이 삭제되었습니다");
             std::move(cb).Run(base::Value(std::move(result)));
@@ -348,7 +356,7 @@ void HistoryTool::OnQueryHistoryResult(
 
   LOG(INFO) << "[HistoryTool] QueryHistory 결과 수=" << results.size();
 
-  base::Value::Dict out;
+  base::DictValue out;
   out.Set("success", true);
   out.Set("total",   static_cast<int>(results.size()));
   out.Set("items",   SerializeResults(results));
@@ -362,10 +370,13 @@ void HistoryTool::OnQueryHistoryResult(
 history::HistoryService* HistoryTool::GetHistoryService(McpSession* session) {
   if (!session) return nullptr;
 
-  // McpSession → Browser → Profile 접근
-  // 실제 구현에서는 session->GetBrowser() 또는 session->GetProfile() 등의
-  // 메서드를 통해 Profile 을 획득한다.
-  Profile* profile = session->GetProfile();
+  // 다른 도구들과 동일한 패턴으로 활성 브라우저에서 Profile 획득.
+  Browser* browser = chrome::FindLastActive();
+  if (!browser) {
+    LOG(ERROR) << "[HistoryTool] 활성 Browser 를 찾을 수 없음";
+    return nullptr;
+  }
+  Profile* profile = browser->profile();
   if (!profile) {
     LOG(ERROR) << "[HistoryTool] Profile 을 가져올 수 없음";
     return nullptr;
@@ -401,21 +412,22 @@ base::Time HistoryTool::ParseIsoTime(const std::string& iso) {
 }
 
 // -----------------------------------------------------------------------
-// 정적 헬퍼: QueryResults → base::Value::List 직렬화
+// 정적 헬퍼: QueryResults → base::ListValue 직렬화
 // -----------------------------------------------------------------------
 // static
-base::Value::List HistoryTool::SerializeResults(
+base::ListValue HistoryTool::SerializeResults(
     const history::QueryResults& results) {
-  base::Value::List list;
+  base::ListValue list;
 
   for (const history::URLResult& item : results) {
-    base::Value::Dict entry;
+    base::DictValue entry;
     entry.Set("url",         item.url().spec());
     entry.Set("title",       base::UTF16ToUTF8(item.title()));
     entry.Set("visitCount",  static_cast<int>(item.visit_count()));
     entry.Set("typedCount",  static_cast<int>(item.typed_count()));
     entry.Set("lastVisited",
-              item.last_visit().InMillisecondsSinceUnixEpoch());
+              static_cast<double>(
+                  item.last_visit().InMillisecondsSinceUnixEpoch()));
     entry.Set("hidden",      item.hidden());
     list.Append(std::move(entry));
   }

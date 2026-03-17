@@ -31,14 +31,14 @@ namespace mcp {
 //   - Shadow DOM 내부 요소는 기본적으로 탐색되지 않는다 (pierce=false).
 class FileUploadTool : public McpTool {
  public:
-  FileUploadTool() = default;
-  ~FileUploadTool() override = default;
+  FileUploadTool();
+  ~FileUploadTool() override;
 
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
-  void Execute(const base::Value::Dict& arguments,
+  base::DictValue input_schema() const override;
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 

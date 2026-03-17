@@ -21,9 +21,9 @@ constexpr double kScrollPixelsPerTick = 120.0;
 
 // MCP 성공 응답 Value 생성
 base::Value MakeSuccessResult(const std::string& message) {
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue item;
   item.Set("type", "text");
   item.Set("text", message);
   content.Append(std::move(item));
@@ -34,9 +34,9 @@ base::Value MakeSuccessResult(const std::string& message) {
 
 // MCP 에러 응답 Value 생성
 base::Value MakeErrorResult(const std::string& message) {
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue item;
   item.Set("type", "text");
   item.Set("text", message);
   content.Append(std::move(item));
@@ -47,7 +47,7 @@ base::Value MakeErrorResult(const std::string& message) {
 
 // CDP 응답에 "error" 키가 있는지 확인한다.
 bool HasCdpError(const base::Value& response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     return true;
   }
@@ -56,11 +56,11 @@ bool HasCdpError(const base::Value& response) {
 
 // CDP 응답에서 에러 메시지를 추출한다.
 std::string ExtractCdpErrorMessage(const base::Value& response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     return "CDP 응답이 Dict 형식이 아님";
   }
-  const base::Value::Dict* error = dict->FindDict("error");
+  const base::DictValue* error = dict->FindDict("error");
   if (!error) {
     return "알 수 없는 CDP 에러";
   }
@@ -73,9 +73,9 @@ std::string ExtractCdpErrorMessage(const base::Value& response) {
 
 // DOM.getDocument 응답에서 rootNodeId를 추출한다.
 int ExtractRootNodeId(const base::Value& response) {
-  const base::Value::Dict* dict = response.GetIfDict();
-  const base::Value::Dict* result = dict ? dict->FindDict("result") : nullptr;
-  const base::Value::Dict* root = result ? result->FindDict("root") : nullptr;
+  const base::DictValue* dict = response.GetIfDict();
+  const base::DictValue* result = dict ? dict->FindDict("result") : nullptr;
+  const base::DictValue* root = result ? result->FindDict("root") : nullptr;
   if (!root) {
     return -1;
   }
@@ -85,11 +85,11 @@ int ExtractRootNodeId(const base::Value& response) {
 
 // DOM.querySelector 응답에서 nodeId를 추출한다.
 int ExtractNodeId(const base::Value& response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     return -1;
   }
-  const base::Value::Dict* result = dict->FindDict("result");
+  const base::DictValue* result = dict->FindDict("result");
   if (!result) {
     return -1;
   }
@@ -101,19 +101,19 @@ int ExtractNodeId(const base::Value& response) {
 bool ExtractBoxModelCenter(const base::Value& response,
                            double* out_x,
                            double* out_y) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     return false;
   }
-  const base::Value::Dict* result = dict->FindDict("result");
+  const base::DictValue* result = dict->FindDict("result");
   if (!result) {
     return false;
   }
-  const base::Value::Dict* model = result->FindDict("model");
+  const base::DictValue* model = result->FindDict("model");
   if (!model) {
     return false;
   }
-  const base::Value::List* content = model->FindList("content");
+  const base::ListValue* content = model->FindList("content");
   if (!content || content->size() < 8) {
     return false;
   }
@@ -168,16 +168,16 @@ std::string ScrollTool::description() const {
          "toTop/toBottom으로 페이지 맨 위/아래로 즉시 이동할 수 있습니다.";
 }
 
-base::Value::Dict ScrollTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue ScrollTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // direction: 스크롤 방향
-  base::Value::Dict direction_prop;
+  base::DictValue direction_prop;
   direction_prop.Set("type", "string");
-  base::Value::List direction_enum;
+  base::ListValue direction_enum;
   direction_enum.Append("up");
   direction_enum.Append("down");
   direction_enum.Append("left");
@@ -189,7 +189,7 @@ base::Value::Dict ScrollTool::input_schema() const {
   properties.Set("direction", std::move(direction_prop));
 
   // amount: 스크롤 틱 수
-  base::Value::Dict amount_prop;
+  base::DictValue amount_prop;
   amount_prop.Set("type", "number");
   amount_prop.Set("default", 3);
   amount_prop.Set("description",
@@ -198,21 +198,21 @@ base::Value::Dict ScrollTool::input_schema() const {
   properties.Set("amount", std::move(amount_prop));
 
   // x: 스크롤 이벤트를 발생시킬 X 좌표
-  base::Value::Dict x_prop;
+  base::DictValue x_prop;
   x_prop.Set("type", "number");
   x_prop.Set("description",
              "스크롤 이벤트를 발생시킬 X 좌표 (픽셀). 생략 시 뷰포트 중앙.");
   properties.Set("x", std::move(x_prop));
 
   // y: 스크롤 이벤트를 발생시킬 Y 좌표
-  base::Value::Dict y_prop;
+  base::DictValue y_prop;
   y_prop.Set("type", "number");
   y_prop.Set("description",
              "스크롤 이벤트를 발생시킬 Y 좌표 (픽셀). 생략 시 뷰포트 중앙.");
   properties.Set("y", std::move(y_prop));
 
   // deltaX: 수평 스크롤량 (픽셀 직접 지정)
-  base::Value::Dict delta_x_prop;
+  base::DictValue delta_x_prop;
   delta_x_prop.Set("type", "number");
   delta_x_prop.Set("default", 0);
   delta_x_prop.Set("description",
@@ -221,7 +221,7 @@ base::Value::Dict ScrollTool::input_schema() const {
   properties.Set("deltaX", std::move(delta_x_prop));
 
   // deltaY: 수직 스크롤량 (픽셀 직접 지정)
-  base::Value::Dict delta_y_prop;
+  base::DictValue delta_y_prop;
   delta_y_prop.Set("type", "number");
   delta_y_prop.Set("default", -300);
   delta_y_prop.Set("description",
@@ -230,7 +230,7 @@ base::Value::Dict ScrollTool::input_schema() const {
   properties.Set("deltaY", std::move(delta_y_prop));
 
   // selector: 스크롤을 발생시킬 요소의 CSS 셀렉터
-  base::Value::Dict selector_prop;
+  base::DictValue selector_prop;
   selector_prop.Set("type", "string");
   selector_prop.Set("description",
                     "스크롤을 발생시킬 요소의 CSS 셀렉터. "
@@ -238,7 +238,7 @@ base::Value::Dict ScrollTool::input_schema() const {
   properties.Set("selector", std::move(selector_prop));
 
   // toTop: 페이지 맨 위로 스크롤
-  base::Value::Dict to_top_prop;
+  base::DictValue to_top_prop;
   to_top_prop.Set("type", "boolean");
   to_top_prop.Set("description",
                   "true이면 window.scrollTo(0, 0) 실행. "
@@ -246,7 +246,7 @@ base::Value::Dict ScrollTool::input_schema() const {
   properties.Set("toTop", std::move(to_top_prop));
 
   // toBottom: 페이지 맨 아래로 스크롤
-  base::Value::Dict to_bottom_prop;
+  base::DictValue to_bottom_prop;
   to_bottom_prop.Set("type", "boolean");
   to_bottom_prop.Set("description",
                      "true이면 window.scrollTo(0, document.body.scrollHeight) 실행. "
@@ -256,13 +256,13 @@ base::Value::Dict ScrollTool::input_schema() const {
   schema.Set("properties", std::move(properties));
 
   // 모든 파라미터가 선택적
-  base::Value::List required;
+  base::ListValue required;
   schema.Set("required", std::move(required));
 
   return schema;
 }
 
-void ScrollTool::Execute(const base::Value::Dict& arguments,
+void ScrollTool::Execute(const base::DictValue& arguments,
                          McpSession* session,
                          base::OnceCallback<void(base::Value)> callback) {
   // toTop/toBottom 처리 (최우선순위)
@@ -329,7 +329,7 @@ void ScrollTool::Execute(const base::Value::Dict& arguments,
 void ScrollTool::EvaluateScroll(const std::string& expression,
                                 McpSession* session,
                                 base::OnceCallback<void(base::Value)> callback) {
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("expression", expression);
   params.Set("returnByValue", false);
   params.Set("awaitPromise", false);
@@ -359,7 +359,7 @@ void ScrollTool::DispatchScroll(double x,
                                 double delta_y,
                                 McpSession* session,
                                 base::OnceCallback<void(base::Value)> callback) {
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("type", "mouseWheel");
   params.Set("x", x);
   params.Set("y", y);
@@ -381,7 +381,7 @@ void ScrollTool::GetDocumentRoot(
     double delta_y,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("depth", 0);
 
   session->SendCdpCommand(
@@ -411,7 +411,7 @@ void ScrollTool::OnGetDocumentRoot(
     return;
   }
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("nodeId", root_node_id);
   params.Set("selector", selector);
 
@@ -441,7 +441,7 @@ void ScrollTool::OnQuerySelector(
     return;
   }
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("nodeId", node_id);
 
   session->SendCdpCommand(

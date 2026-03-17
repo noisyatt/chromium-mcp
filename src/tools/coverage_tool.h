@@ -47,8 +47,8 @@ class CoverageTool : public McpTool {
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
-  void Execute(const base::Value::Dict& arguments,
+  base::DictValue input_schema() const override;
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 
@@ -124,14 +124,14 @@ class CoverageTool : public McpTool {
 
   // CSS ruleUsage 배열에서 사용/미사용 통계를 집계한다.
   // detailed=false이면 summary만, detailed=true이면 ruleUsage 배열도 포함.
-  static base::Value::Dict AggregateCssUsage(
-      const base::Value::List& rule_usage,
+  static base::DictValue AggregateCssUsage(
+      const base::ListValue& rule_usage,
       bool detailed);
 
   // JS ScriptCoverage 배열에서 바이트 단위 커버리지를 집계한다.
   // detailed=false이면 URL별 요약만, detailed=true이면 함수 범위 세부 정보 포함.
-  static base::Value::Dict AggregateJsUsage(
-      const base::Value::List& script_coverage,
+  static base::DictValue AggregateJsUsage(
+      const base::ListValue& script_coverage,
       bool detailed);
 
   // -----------------------------------------------------------------------

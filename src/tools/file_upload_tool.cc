@@ -12,6 +12,9 @@
 
 namespace mcp {
 
+FileUploadTool::FileUploadTool() = default;
+FileUploadTool::~FileUploadTool() = default;
+
 std::string FileUploadTool::name() const {
   return "file_upload";
 }
@@ -20,16 +23,16 @@ std::string FileUploadTool::description() const {
   return "파일 입력 요소에 파일 업로드";
 }
 
-base::Value::Dict FileUploadTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue FileUploadTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // selector: file input 요소를 찾는 CSS 선택자 (필수)
   // 예: "input[type=file]", "#file-upload", ".upload-btn"
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "string");
     prop.Set("description",
              "파일 입력 요소의 CSS 선택자 "
@@ -40,9 +43,9 @@ base::Value::Dict FileUploadTool::input_schema() const {
   // filePaths: 업로드할 파일의 절대 경로 배열 (필수)
   // 각 경로는 Chromium 프로세스가 접근 가능한 로컬 절대 경로여야 한다.
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "array");
-    base::Value::Dict items;
+    base::DictValue items;
     items.Set("type", "string");
     prop.Set("items", std::move(items));
     prop.Set("description",
@@ -55,7 +58,7 @@ base::Value::Dict FileUploadTool::input_schema() const {
   schema.Set("properties", std::move(properties));
 
   // selector와 filePaths 모두 필수 파라미터
-  base::Value::List required;
+  base::ListValue required;
   required.Append("selector");
   required.Append("filePaths");
   schema.Set("required", std::move(required));
@@ -63,7 +66,7 @@ base::Value::Dict FileUploadTool::input_schema() const {
   return schema;
 }
 
-void FileUploadTool::Execute(const base::Value::Dict& arguments,
+void FileUploadTool::Execute(const base::DictValue& arguments,
                               McpSession* session,
                               base::OnceCallback<void(base::Value)> callback) {
   // -------------------------------------------------------------------------
@@ -72,17 +75,17 @@ void FileUploadTool::Execute(const base::Value::Dict& arguments,
   const std::string* selector_ptr = arguments.FindString("selector");
   if (!selector_ptr || selector_ptr->empty()) {
     LOG(WARNING) << "[FileUploadTool] selector 파라미터 없음";
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "selector 파라미터가 필요합니다");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
   }
 
   // filePaths 배열 추출
-  const base::Value::List* paths_list = arguments.FindList("filePaths");
+  const base::ListValue* paths_list = arguments.FindList("filePaths");
   if (!paths_list || paths_list->empty()) {
     LOG(WARNING) << "[FileUploadTool] filePaths 파라미터 없거나 비어있음";
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error",
             "filePaths 파라미터가 필요합니다 (비어있지 않은 문자열 배열)");
     std::move(callback).Run(base::Value(std::move(err)));
@@ -98,7 +101,7 @@ void FileUploadTool::Execute(const base::Value::Dict& arguments,
   }
 
   if (file_paths.empty()) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "filePaths 배열에 유효한 파일 경로가 없습니다");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
@@ -123,7 +126,7 @@ void FileUploadTool::FetchDocument(
     base::OnceCallback<void(base::Value)> callback) {
   // depth=0: 루트 노드 정보만 필요 (자식 노드 트리 불필요)
   // pierce=false: Shadow DOM 내부 탐색 제외
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("depth", 0);
   params.Set("pierce", false);
 
@@ -145,22 +148,22 @@ void FileUploadTool::OnDocumentReceived(
   // 응답 형식: {"result": {"root": {"nodeId": 1, ...}}}
   if (!response.is_dict()) {
     LOG(ERROR) << "[FileUploadTool] DOM.getDocument 응답 형식 오류";
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error", "DOM.getDocument 응답 형식 오류");
     std::move(callback).Run(base::Value(std::move(result)));
     return;
   }
 
-  const base::Value::Dict& dict = response.GetDict();
+  const base::DictValue& dict = response.GetDict();
 
   // CDP 오류 확인
-  const base::Value::Dict* error_dict = dict.FindDict("error");
+  const base::DictValue* error_dict = dict.FindDict("error");
   if (error_dict) {
     const std::string* msg = error_dict->FindString("message");
     std::string err_msg = msg ? *msg : "DOM.getDocument CDP 오류";
     LOG(ERROR) << "[FileUploadTool] DOM.getDocument 오류: " << err_msg;
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error", err_msg);
     std::move(callback).Run(base::Value(std::move(result)));
@@ -168,18 +171,18 @@ void FileUploadTool::OnDocumentReceived(
   }
 
   // result.root.nodeId 추출
-  const base::Value::Dict* result_dict = dict.FindDict("result");
+  const base::DictValue* result_dict = dict.FindDict("result");
   if (!result_dict) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error", "DOM.getDocument 응답에 result 필드가 없습니다");
     std::move(callback).Run(base::Value(std::move(result)));
     return;
   }
 
-  const base::Value::Dict* root_dict = result_dict->FindDict("root");
+  const base::DictValue* root_dict = result_dict->FindDict("root");
   if (!root_dict) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error", "DOM.getDocument 응답에 root 필드가 없습니다");
     std::move(callback).Run(base::Value(std::move(result)));
@@ -188,7 +191,7 @@ void FileUploadTool::OnDocumentReceived(
 
   std::optional<int> node_id_opt = root_dict->FindInt("nodeId");
   if (!node_id_opt.has_value()) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error", "문서 루트 nodeId를 찾을 수 없습니다");
     std::move(callback).Run(base::Value(std::move(result)));
@@ -213,7 +216,7 @@ void FileUploadTool::QuerySelector(
     std::vector<std::string> file_paths,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("nodeId", root_node_id);
   params.Set("selector", selector);
 
@@ -235,30 +238,30 @@ void FileUploadTool::OnQuerySelectorResult(
   // 응답 형식: {"result": {"nodeId": 42}}
   // nodeId=0 이면 요소를 찾지 못한 것
   if (!response.is_dict()) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error", "DOM.querySelector 응답 형식 오류");
     std::move(callback).Run(base::Value(std::move(result)));
     return;
   }
 
-  const base::Value::Dict& dict = response.GetDict();
+  const base::DictValue& dict = response.GetDict();
 
-  const base::Value::Dict* error_dict = dict.FindDict("error");
+  const base::DictValue* error_dict = dict.FindDict("error");
   if (error_dict) {
     const std::string* msg = error_dict->FindString("message");
     std::string err_msg = msg ? *msg : "DOM.querySelector CDP 오류";
     LOG(ERROR) << "[FileUploadTool] DOM.querySelector 오류: " << err_msg;
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error", err_msg);
     std::move(callback).Run(base::Value(std::move(result)));
     return;
   }
 
-  const base::Value::Dict* result_dict = dict.FindDict("result");
+  const base::DictValue* result_dict = dict.FindDict("result");
   if (!result_dict) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error", "DOM.querySelector 응답에 result 필드가 없습니다");
     std::move(callback).Run(base::Value(std::move(result)));
@@ -270,7 +273,7 @@ void FileUploadTool::OnQuerySelectorResult(
     // nodeId=0: 요소를 찾지 못함
     LOG(WARNING) << "[FileUploadTool] 선택자에 해당하는 요소 없음: "
                  << selector;
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error",
                "선택자 '" + selector + "'에 해당하는 요소를 찾을 수 없습니다");
@@ -299,9 +302,9 @@ void FileUploadTool::SetFileInputFiles(
   // DOM.setFileInputFiles 파라미터:
   //   files  : 설정할 파일 경로 배열 (절대 경로)
   //   nodeId : 대상 file input 요소의 nodeId
-  base::Value::Dict params;
+  base::DictValue params;
 
-  base::Value::List file_list;
+  base::ListValue file_list;
   for (const std::string& path : file_paths) {
     file_list.Append(path);
     LOG(INFO) << "[FileUploadTool] 파일 경로 추가: " << path;
@@ -326,21 +329,21 @@ void FileUploadTool::OnSetFileInputFilesResult(
     base::Value response) {
   // DOM.setFileInputFiles 성공 시 빈 result 객체가 반환된다.
   if (!response.is_dict()) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error", "DOM.setFileInputFiles 응답 형식 오류");
     std::move(callback).Run(base::Value(std::move(result)));
     return;
   }
 
-  const base::Value::Dict& dict = response.GetDict();
+  const base::DictValue& dict = response.GetDict();
 
-  const base::Value::Dict* error_dict = dict.FindDict("error");
+  const base::DictValue* error_dict = dict.FindDict("error");
   if (error_dict) {
     const std::string* msg = error_dict->FindString("message");
     std::string err_msg = msg ? *msg : "DOM.setFileInputFiles CDP 오류";
     LOG(ERROR) << "[FileUploadTool] 파일 설정 실패: " << err_msg;
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error", err_msg);
     std::move(callback).Run(base::Value(std::move(result)));
@@ -351,12 +354,12 @@ void FileUploadTool::OnSetFileInputFilesResult(
   LOG(INFO) << "[FileUploadTool] 파일 설정 완료, selector=" << selector
             << ", 파일 수=" << file_paths.size();
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success", true);
   result.Set("selector", selector);
 
   // 설정된 파일 경로 목록
-  base::Value::List uploaded;
+  base::ListValue uploaded;
   for (const std::string& path : file_paths) {
     uploaded.Append(path);
   }

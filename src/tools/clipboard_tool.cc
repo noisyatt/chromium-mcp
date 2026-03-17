@@ -19,9 +19,9 @@ namespace {
 
 // MCP 성공 응답 Value 생성.
 base::Value MakeSuccessResult(const std::string& text) {
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue item;
   item.Set("type", "text");
   item.Set("text", text);
   content.Append(std::move(item));
@@ -32,9 +32,9 @@ base::Value MakeSuccessResult(const std::string& text) {
 
 // MCP 에러 응답 Value 생성.
 base::Value MakeErrorResult(const std::string& text) {
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue item;
   item.Set("type", "text");
   item.Set("text", text);
   content.Append(std::move(item));
@@ -59,17 +59,17 @@ std::string ClipboardTool::description() const {
          "ui::Clipboard API를 직접 사용하므로 페이지 컨텍스트와 무관하게 동작합니다.";
 }
 
-base::Value::Dict ClipboardTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue ClipboardTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // action: 필수 파라미터
   {
-    base::Value::Dict action_prop;
+    base::DictValue action_prop;
     action_prop.Set("type", "string");
-    base::Value::List action_enum;
+    base::ListValue action_enum;
     action_enum.Append("read");
     action_enum.Append("write");
     action_prop.Set("enum", std::move(action_enum));
@@ -80,7 +80,7 @@ base::Value::Dict ClipboardTool::input_schema() const {
 
   // text: 클립보드에 쓸 텍스트 (write 시 필수)
   {
-    base::Value::Dict text_prop;
+    base::DictValue text_prop;
     text_prop.Set("type", "string");
     text_prop.Set("description",
                   "클립보드에 쓸 텍스트. action=write 시 필수.");
@@ -90,7 +90,7 @@ base::Value::Dict ClipboardTool::input_schema() const {
   schema.Set("properties", std::move(properties));
 
   // action만 필수
-  base::Value::List required;
+  base::ListValue required;
   required.Append("action");
   schema.Set("required", std::move(required));
 
@@ -98,7 +98,7 @@ base::Value::Dict ClipboardTool::input_schema() const {
 }
 
 void ClipboardTool::Execute(
-    const base::Value::Dict& arguments,
+    const base::DictValue& arguments,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   const std::string* action = arguments.FindString("action");
@@ -112,8 +112,8 @@ void ClipboardTool::Execute(
   LOG(INFO) << "[ClipboardTool] action=" << *action;
 
   if (*action == "read") {
-    // ui::Clipboard API는 동기식이므로 즉시 결과 반환
-    std::move(callback).Run(HandleRead());
+    // ReadText()가 callback 기반이므로 HandleRead에 callback을 전달
+    HandleRead(std::move(callback));
   } else if (*action == "write") {
     const std::string* text = arguments.FindString("text");
     if (!text) {
@@ -136,32 +136,39 @@ void ClipboardTool::Execute(
 //   X11의 PRIMARY 선택(마우스 드래그 선택)은 kSelection 버퍼를 사용한다.
 //
 // ★ DataTransferEndpoint ★
-//   nullptr을 전달하면 엔드포인트 제한 없이 읽는다.
+//   std::nullopt을 전달하면 엔드포인트 제한 없이 읽는다.
 //   Chromium 내부 도구이므로 보안 정책 검사가 불필요하다.
 //
 // ★ ui::Clipboard는 std::u16string(UTF-16)을 사용한다 ★
-//   base::UTF16ToUTF8()로 변환하여 MCP 응답에 포함한다.
-base::Value ClipboardTool::HandleRead() {
+//   ReadTextCallback 내에서 base::UTF16ToUTF8()로 변환하여 MCP 응답에 포함한다.
+//
+// ★ ReadText()는 callback 기반 비동기 API이다 ★
+//   결과는 ReadTextCallback(std::u16string)으로 전달된다.
+void ClipboardTool::HandleRead(base::OnceCallback<void(base::Value)> callback) {
   ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
   if (!clipboard) {
     LOG(ERROR) << "[ClipboardTool] ui::Clipboard 인스턴스를 가져올 수 없음";
-    return MakeErrorResult("클립보드 인스턴스를 가져올 수 없습니다.");
+    std::move(callback).Run(
+        MakeErrorResult("클립보드 인스턴스를 가져올 수 없습니다."));
+    return;
   }
 
-  std::u16string text_utf16;
   // ReadText: kCopyPaste 버퍼에서 일반 텍스트를 읽는다.
-  // DataTransferEndpoint* = nullptr: 엔드포인트 제한 없음.
-  clipboard->ReadText(ui::ClipboardBuffer::kCopyPaste,
-                      /*data_dst=*/nullptr,
-                      &text_utf16);
-
-  // UTF-16 → UTF-8 변환 (MCP 응답은 UTF-8 문자열 사용)
-  std::string text_utf8 = base::UTF16ToUTF8(text_utf16);
-
-  LOG(INFO) << "[ClipboardTool] 클립보드 읽기 완료 "
-            << "(길이: " << text_utf8.size() << " bytes)";
-
-  return MakeSuccessResult(text_utf8);
+  // data_dst=std::nullopt: 엔드포인트 제한 없음.
+  // callback 내에서 UTF-16 → UTF-8 변환 후 MCP 응답을 반환한다.
+  clipboard->ReadText(
+      ui::ClipboardBuffer::kCopyPaste,
+      /*data_dst=*/std::nullopt,
+      base::BindOnce(
+          [](base::OnceCallback<void(base::Value)> cb,
+             std::u16string text_utf16) {
+            // UTF-16 → UTF-8 변환 (MCP 응답은 UTF-8 문자열 사용)
+            std::string text_utf8 = base::UTF16ToUTF8(text_utf16);
+            LOG(INFO) << "[ClipboardTool] 클립보드 읽기 완료 "
+                      << "(길이: " << text_utf8.size() << " bytes)";
+            std::move(cb).Run(MakeSuccessResult(text_utf8));
+          },
+          std::move(callback)));
 }
 
 // action=write: ui::ScopedClipboardWriter로 텍스트를 클립보드에 씀.

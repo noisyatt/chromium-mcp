@@ -4,7 +4,6 @@
 
 #include "chrome/browser/mcp/tools/console_tool.h"
 
-#include <regex>
 #include <utility>
 
 #include "base/logging.h"
@@ -44,17 +43,17 @@ std::string ConsoleTool::description() const {
          "안전 모드(Log.enable)와 전체 모드(Runtime.consoleAPICalled) 지원.";
 }
 
-base::Value::Dict ConsoleTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue ConsoleTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // action: 수행할 동작
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "string");
-    base::Value::List enums;
+    base::ListValue enums;
     enums.Append("start");
     enums.Append("stop");
     enums.Append("get");
@@ -68,9 +67,9 @@ base::Value::Dict ConsoleTool::input_schema() const {
 
   // level: 메시지 레벨 필터 (get 동작 시 사용, 기본값 all)
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "string");
-    base::Value::List enums;
+    base::ListValue enums;
     enums.Append("all");
     enums.Append("log");
     enums.Append("info");
@@ -86,7 +85,7 @@ base::Value::Dict ConsoleTool::input_schema() const {
 
   // pattern: 메시지 텍스트 필터링 정규식
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "string");
     prop.Set("description",
              "메시지 텍스트를 필터링할 정규식 (get 동작에서만 사용됨)");
@@ -95,7 +94,7 @@ base::Value::Dict ConsoleTool::input_schema() const {
 
   // limit: 최대 반환 메시지 수
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "number");
     prop.Set("description",
              "최대 반환 메시지 수 (get 동작에서만 사용됨, 기본값: 제한 없음)");
@@ -104,7 +103,7 @@ base::Value::Dict ConsoleTool::input_schema() const {
 
   // safeMode: 안전 모드 여부 (start 동작 시 사용, 기본값 true)
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "boolean");
     prop.Set("description",
              "안전 모드 사용 여부 (기본값: true). "
@@ -116,19 +115,19 @@ base::Value::Dict ConsoleTool::input_schema() const {
 
   schema.Set("properties", std::move(properties));
 
-  base::Value::List required;
+  base::ListValue required;
   required.Append("action");
   schema.Set("required", std::move(required));
 
   return schema;
 }
 
-void ConsoleTool::Execute(const base::Value::Dict& arguments,
+void ConsoleTool::Execute(const base::DictValue& arguments,
                           McpSession* session,
                           base::OnceCallback<void(base::Value)> callback) {
   const std::string* action_ptr = arguments.FindString("action");
   if (!action_ptr || action_ptr->empty()) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "action 파라미터가 필요합니다 (start/stop/get/clear)");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
@@ -165,7 +164,7 @@ void ConsoleTool::Execute(const base::Value::Dict& arguments,
     ClearMessages(std::move(callback));
 
   } else {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "유효하지 않은 action: " + action);
     std::move(callback).Run(base::Value(std::move(err)));
   }
@@ -178,7 +177,7 @@ void ConsoleTool::Execute(const base::Value::Dict& arguments,
 void ConsoleTool::StartSafeMode(McpSession* session,
                                  base::OnceCallback<void(base::Value)> callback) {
   if (is_capturing_) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", true);
     result.Set("message", "이미 콘솔 캡처가 진행 중입니다");
     result.Set("mode", safe_mode_ ? "safe" : "full");
@@ -192,7 +191,7 @@ void ConsoleTool::StartSafeMode(McpSession* session,
   // Log.enable: Runtime.enable 없이 브라우저 콘솔 메시지를 수신할 수 있다.
   // 이 도메인은 자동화 탐지에 영향을 주지 않는다.
   session->SendCdpCommand(
-      "Log.enable", base::Value::Dict(),
+      "Log.enable", base::DictValue(),
       base::BindOnce(&ConsoleTool::OnLogEnabled,
                      weak_factory_.GetWeakPtr(), session,
                      std::move(callback)));
@@ -203,12 +202,12 @@ void ConsoleTool::OnLogEnabled(McpSession* session,
                                 base::Value response) {
   // CDP 오류 확인
   if (response.is_dict()) {
-    const base::Value::Dict* err = response.GetDict().FindDict("error");
+    const base::DictValue* err = response.GetDict().FindDict("error");
     if (err) {
       const std::string* msg = err->FindString("message");
       std::string err_msg = msg ? *msg : "Log.enable 실패";
       LOG(ERROR) << "[ConsoleTool] Log.enable 오류: " << err_msg;
-      base::Value::Dict result;
+      base::DictValue result;
       result.Set("success", false);
       result.Set("error", err_msg);
       std::move(callback).Run(base::Value(std::move(result)));
@@ -226,7 +225,7 @@ void ConsoleTool::OnLogEnabled(McpSession* session,
   is_capturing_ = true;
   LOG(INFO) << "[ConsoleTool] 안전 모드 캡처 시작됨 (Log.entryAdded 수신 중)";
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success", true);
   result.Set("message", "콘솔 캡처를 시작했습니다 (안전 모드: Log.entryAdded)");
   result.Set("mode", "safe");
@@ -234,7 +233,7 @@ void ConsoleTool::OnLogEnabled(McpSession* session,
 }
 
 void ConsoleTool::OnLogEntryAdded(const std::string& event_name,
-                                   const base::Value::Dict& params) {
+                                   const base::DictValue& params) {
   // Log.entryAdded 이벤트 파라미터:
   //   entry: {
   //     source: "javascript" | "network" | "other" | ...
@@ -246,7 +245,7 @@ void ConsoleTool::OnLogEntryAdded(const std::string& event_name,
   //     stackTrace: 호출 스택 (선택적)
   //   }
 
-  const base::Value::Dict* entry = params.FindDict("entry");
+  const base::DictValue* entry = params.FindDict("entry");
   if (!entry) return;
 
   const std::string* level_ptr = entry->FindString("level");
@@ -264,7 +263,7 @@ void ConsoleTool::OnLogEntryAdded(const std::string& event_name,
   std::optional<double> timestamp = entry->FindDouble("timestamp");
   std::optional<int>    line_num  = entry->FindInt("lineNumber");
 
-  base::Value::Dict msg_entry;
+  base::DictValue msg_entry;
   msg_entry.Set("level", level);
   msg_entry.Set("text", text);
   msg_entry.Set("source", "log_domain");
@@ -284,7 +283,7 @@ void ConsoleTool::OnLogEntryAdded(const std::string& event_name,
 void ConsoleTool::StartFullMode(McpSession* session,
                                  base::OnceCallback<void(base::Value)> callback) {
   if (is_capturing_) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", true);
     result.Set("message", "이미 콘솔 캡처가 진행 중입니다");
     result.Set("mode", safe_mode_ ? "safe" : "full");
@@ -300,7 +299,7 @@ void ConsoleTool::StartFullMode(McpSession* session,
   // executionContextCreated 이벤트가 발생하여 일부 봇 탐지 스크립트에 감지될 수 있다.
   // 은닉이 필요한 경우 StartSafeMode()를 사용할 것.
   session->SendCdpCommand(
-      "Runtime.enable", base::Value::Dict(),
+      "Runtime.enable", base::DictValue(),
       base::BindOnce(&ConsoleTool::OnRuntimeEnabled,
                      weak_factory_.GetWeakPtr(), session,
                      std::move(callback)));
@@ -310,12 +309,12 @@ void ConsoleTool::OnRuntimeEnabled(McpSession* session,
                                     base::OnceCallback<void(base::Value)> callback,
                                     base::Value response) {
   if (response.is_dict()) {
-    const base::Value::Dict* err = response.GetDict().FindDict("error");
+    const base::DictValue* err = response.GetDict().FindDict("error");
     if (err) {
       const std::string* msg = err->FindString("message");
       std::string err_msg = msg ? *msg : "Runtime.enable 실패";
       LOG(ERROR) << "[ConsoleTool] Runtime.enable 오류: " << err_msg;
-      base::Value::Dict result;
+      base::DictValue result;
       result.Set("success", false);
       result.Set("error", err_msg);
       std::move(callback).Run(base::Value(std::move(result)));
@@ -332,7 +331,7 @@ void ConsoleTool::OnRuntimeEnabled(McpSession* session,
   is_capturing_ = true;
   LOG(INFO) << "[ConsoleTool] 전체 모드 캡처 시작됨 (Runtime.consoleAPICalled 수신 중)";
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success", true);
   result.Set("message",
              "콘솔 캡처를 시작했습니다 (전체 모드: Runtime.consoleAPICalled). "
@@ -342,7 +341,7 @@ void ConsoleTool::OnRuntimeEnabled(McpSession* session,
 }
 
 void ConsoleTool::OnConsoleApiCalled(const std::string& event_name,
-                                      const base::Value::Dict& params) {
+                                      const base::DictValue& params) {
   // Runtime.consoleAPICalled 이벤트 파라미터:
   //   type: "log" | "debug" | "info" | "warning" | "error" | "dir" | ...
   //   args: RemoteObject[] — 각 인수의 상세 정보
@@ -357,7 +356,7 @@ void ConsoleTool::OnConsoleApiCalled(const std::string& event_name,
 
   // args 배열에서 메시지 텍스트 조합
   std::string text;
-  const base::Value::List* args = params.FindList("args");
+  const base::ListValue* args = params.FindList("args");
   if (args) {
     text = ExtractTextFromArgs(*args);
   }
@@ -367,13 +366,13 @@ void ConsoleTool::OnConsoleApiCalled(const std::string& event_name,
   // stackTrace에서 첫 번째 호출 위치 추출
   std::string call_url;
   std::optional<int> line_num;
-  const base::Value::Dict* stack = params.FindDict("stackTrace");
+  const base::DictValue* stack = params.FindDict("stackTrace");
   if (stack) {
-    const base::Value::List* frames = stack->FindList("callFrames");
+    const base::ListValue* frames = stack->FindList("callFrames");
     if (frames && !frames->empty()) {
       const auto& first = (*frames)[0];
       if (first.is_dict()) {
-        const base::Value::Dict& f = first.GetDict();
+        const base::DictValue& f = first.GetDict();
         const std::string* url = f.FindString("url");
         if (url) call_url = *url;
         line_num = f.FindInt("lineNumber");
@@ -381,7 +380,7 @@ void ConsoleTool::OnConsoleApiCalled(const std::string& event_name,
     }
   }
 
-  base::Value::Dict msg_entry;
+  base::DictValue msg_entry;
   msg_entry.Set("level", level);
   msg_entry.Set("text", text);
   msg_entry.Set("source", "runtime_domain");
@@ -401,7 +400,7 @@ void ConsoleTool::OnConsoleApiCalled(const std::string& event_name,
 void ConsoleTool::StopCapture(McpSession* session,
                                base::OnceCallback<void(base::Value)> callback) {
   if (!is_capturing_) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", true);
     result.Set("message", "캡처가 이미 중지되어 있습니다");
     std::move(callback).Run(base::Value(std::move(result)));
@@ -419,7 +418,7 @@ void ConsoleTool::StopCapture(McpSession* session,
   LOG(INFO) << "[ConsoleTool] 캡처 중지됨, 저장된 메시지 수: "
             << messages_.size();
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success", true);
   result.Set("message", "콘솔 캡처를 중지했습니다");
   result.Set("messageCount", static_cast<int>(messages_.size()));
@@ -435,32 +434,21 @@ void ConsoleTool::GetMessages(const std::string& level_filter,
                                const std::string& pattern_filter,
                                int limit,
                                base::OnceCallback<void(base::Value)> callback) {
-  // 정규식 컴파일
-  std::optional<std::regex> pattern_regex;
-  if (!pattern_filter.empty()) {
-    try {
-      pattern_regex = std::regex(pattern_filter, std::regex::ECMAScript);
-    } catch (const std::regex_error& e) {
-      LOG(WARNING) << "[ConsoleTool] 정규식 컴파일 오류: " << e.what();
-      base::Value::Dict err;
-      err.Set("error", "유효하지 않은 정규식: " + std::string(e.what()));
-      std::move(callback).Run(base::Value(std::move(err)));
-      return;
-    }
-  }
+  // 패턴 필터 확인 (단순 부분 문자열 매칭)
+  const bool has_filter = !pattern_filter.empty();
 
-  base::Value::List filtered;
+  base::ListValue filtered;
 
   for (const auto& msg : messages_) {
     // 레벨 필터
     const std::string* lv = msg.FindString("level");
     if (!MatchesLevel(lv ? *lv : "", level_filter)) continue;
 
-    // 정규식 필터
-    if (pattern_regex.has_value()) {
+    // 패턴 필터 (부분 문자열 매칭)
+    if (has_filter) {
       const std::string* text = msg.FindString("text");
       std::string msg_text = text ? *text : "";
-      if (!std::regex_search(msg_text, *pattern_regex)) continue;
+      if (msg_text.find(pattern_filter) == std::string::npos) continue;
     }
 
     filtered.Append(msg.Clone());
@@ -475,7 +463,7 @@ void ConsoleTool::GetMessages(const std::string& level_filter,
             << " pattern=" << pattern_filter
             << " limit=" << limit;
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success", true);
   result.Set("messages", std::move(filtered));
   result.Set("totalCount", static_cast<int>(messages_.size()));
@@ -495,7 +483,7 @@ void ConsoleTool::ClearMessages(
 
   LOG(INFO) << "[ConsoleTool] 메시지 버퍼 초기화: " << cleared << "개 삭제";
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success", true);
   result.Set("message", "콘솔 메시지 버퍼를 초기화했습니다");
   result.Set("clearedCount", cleared);
@@ -507,11 +495,11 @@ void ConsoleTool::ClearMessages(
 // -----------------------------------------------------------------------
 
 // static
-std::string ConsoleTool::ExtractTextFromArgs(const base::Value::List& args) {
+std::string ConsoleTool::ExtractTextFromArgs(const base::ListValue& args) {
   std::string result;
   for (const auto& arg : args) {
     if (!arg.is_dict()) continue;
-    const base::Value::Dict& d = arg.GetDict();
+    const base::DictValue& d = arg.GetDict();
 
     if (!result.empty()) result += " ";
 

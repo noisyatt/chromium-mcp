@@ -25,16 +25,16 @@ std::string PageContentTool::description() const {
   return "페이지의 접근성 트리 또는 HTML 반환";
 }
 
-base::Value::Dict PageContentTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue PageContentTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // mode: 콘텐츠 취득 방식 선택 (기본값 "accessibility")
-  base::Value::Dict mode_prop;
+  base::DictValue mode_prop;
   mode_prop.Set("type", "string");
-  base::Value::List mode_enum;
+  base::ListValue mode_enum;
   mode_enum.Append("accessibility");
   mode_enum.Append("html");
   mode_enum.Append("text");
@@ -46,7 +46,7 @@ base::Value::Dict PageContentTool::input_schema() const {
   properties.Set("mode", std::move(mode_prop));
 
   // selector: 특정 요소 범위로 제한 (html/text 모드에서 사용)
-  base::Value::Dict selector_prop;
+  base::DictValue selector_prop;
   selector_prop.Set("type", "string");
   selector_prop.Set("description",
                     "콘텐츠를 가져올 요소의 CSS 선택자 (html/text 모드 전용, "
@@ -57,7 +57,7 @@ base::Value::Dict PageContentTool::input_schema() const {
   return schema;
 }
 
-void PageContentTool::Execute(const base::Value::Dict& arguments,
+void PageContentTool::Execute(const base::DictValue& arguments,
                               McpSession* session,
                               base::OnceCallback<void(base::Value)> callback) {
   // mode 파라미터 추출 (기본값 "accessibility")
@@ -86,7 +86,7 @@ void PageContentTool::Execute(const base::Value::Dict& arguments,
 
   } else {
     LOG(WARNING) << "[PageContentTool] 알 수 없는 mode: " << mode;
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "지원하지 않는 mode: " + mode);
     std::move(callback).Run(base::Value(std::move(err)));
   }
@@ -101,7 +101,7 @@ void PageContentTool::FetchAccessibilityTree(
     base::OnceCallback<void(base::Value)> callback) {
   // Accessibility.getFullAXTree: 페이지 전체의 접근성 트리를 반환한다.
   // 파라미터 없이 호출하면 현재 활성 프레임의 전체 트리를 가져온다.
-  base::Value::Dict params;
+  base::DictValue params;
   // depth를 지정하지 않으면 전체 트리 반환 (depth=-1 또는 생략)
 
   LOG(INFO) << "[PageContentTool] Accessibility.getFullAXTree 호출";
@@ -116,39 +116,39 @@ void PageContentTool::OnAccessibilityTreeResponse(
     base::Value response) {
   if (!response.is_dict()) {
     LOG(ERROR) << "[PageContentTool] Accessibility.getFullAXTree 응답 오류";
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "Accessibility.getFullAXTree 실패");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
   }
 
-  const base::Value::Dict& dict = response.GetDict();
+  const base::DictValue& dict = response.GetDict();
 
   // CDP 오류 응답 확인
-  const base::Value::Dict* error_dict = dict.FindDict("error");
+  const base::DictValue* error_dict = dict.FindDict("error");
   if (error_dict) {
     const std::string* msg = error_dict->FindString("message");
     std::string error_msg = msg ? *msg : "알 수 없는 CDP 오류";
     LOG(ERROR) << "[PageContentTool] AX tree CDP 오류: " << error_msg;
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", error_msg);
     std::move(callback).Run(base::Value(std::move(err)));
     return;
   }
 
   // 응답에서 "nodes" 배열 추출
-  const base::Value::List* nodes = dict.FindList("nodes");
+  const base::ListValue* nodes = dict.FindList("nodes");
   if (!nodes) {
     LOG(WARNING) << "[PageContentTool] AX 트리 nodes 없음";
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("mode", "accessibility");
-    result.Set("nodes", base::Value::List());
+    result.Set("nodes", base::ListValue());
     std::move(callback).Run(base::Value(std::move(result)));
     return;
   }
 
   LOG(INFO) << "[PageContentTool] AX 트리 노드 수: " << nodes->size();
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("mode", "accessibility");
   result.Set("nodes", nodes->Clone());
   std::move(callback).Run(base::Value(std::move(result)));
@@ -163,7 +163,7 @@ void PageContentTool::FetchHtmlContent(
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   // DOM.getDocument로 루트 nodeId를 가져온 뒤 DOM.getOuterHTML 호출
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("depth", 0);   // 루트 노드 정보만 필요
   params.Set("pierce", false);
 
@@ -181,16 +181,16 @@ void PageContentTool::OnGetDocumentResponse(
     base::Value response) {
   if (!response.is_dict()) {
     LOG(ERROR) << "[PageContentTool] DOM.getDocument 응답 오류";
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "DOM.getDocument 실패");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
   }
 
-  const base::Value::Dict* root = response.GetDict().FindDict("root");
+  const base::DictValue* root = response.GetDict().FindDict("root");
   if (!root) {
     LOG(ERROR) << "[PageContentTool] DOM root 없음";
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "DOM 루트 노드 없음");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
@@ -198,7 +198,7 @@ void PageContentTool::OnGetDocumentResponse(
 
   std::optional<int> root_node_id = root->FindInt("nodeId");
   if (!root_node_id) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "루트 nodeId 추출 실패");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
@@ -206,7 +206,7 @@ void PageContentTool::OnGetDocumentResponse(
 
   if (selector.empty()) {
     // selector 없음: 루트 노드 전체 HTML 반환
-    base::Value::Dict outer_html_params;
+    base::DictValue outer_html_params;
     outer_html_params.Set("nodeId", *root_node_id);
 
     session->SendCdpCommand(
@@ -215,7 +215,7 @@ void PageContentTool::OnGetDocumentResponse(
                        weak_factory_.GetWeakPtr(), std::move(callback)));
   } else {
     // selector 지정: 먼저 DOM.querySelector로 특정 노드 ID 탐색
-    base::Value::Dict qs_params;
+    base::DictValue qs_params;
     qs_params.Set("nodeId", *root_node_id);
     qs_params.Set("selector", selector);
 
@@ -226,7 +226,7 @@ void PageContentTool::OnGetDocumentResponse(
                base::OnceCallback<void(base::Value)> cb,
                base::Value qs_response) {
               if (!qs_response.is_dict()) {
-                base::Value::Dict err;
+                base::DictValue err;
                 err.Set("error", "DOM.querySelector 실패");
                 std::move(cb).Run(base::Value(std::move(err)));
                 return;
@@ -236,14 +236,14 @@ void PageContentTool::OnGetDocumentResponse(
                   qs_response.GetDict().FindInt("nodeId");
               if (!node_id || *node_id == 0) {
                 LOG(WARNING) << "[PageContentTool] selector 요소 없음";
-                base::Value::Dict err;
+                base::DictValue err;
                 err.Set("error", "해당 selector의 요소를 찾을 수 없음");
                 std::move(cb).Run(base::Value(std::move(err)));
                 return;
               }
 
               // 찾은 노드의 outerHTML 취득
-              base::Value::Dict outer_params;
+              base::DictValue outer_params;
               outer_params.Set("nodeId", *node_id);
               sess->SendCdpCommand(
                   "DOM.getOuterHTML", std::move(outer_params),
@@ -251,14 +251,14 @@ void PageContentTool::OnGetDocumentResponse(
                       [](base::OnceCallback<void(base::Value)> done,
                          base::Value outer_response) {
                         if (!outer_response.is_dict()) {
-                          base::Value::Dict err;
+                          base::DictValue err;
                           err.Set("error", "DOM.getOuterHTML 실패");
                           std::move(done).Run(base::Value(std::move(err)));
                           return;
                         }
                         const std::string* html =
                             outer_response.GetDict().FindString("outerHTML");
-                        base::Value::Dict result;
+                        base::DictValue result;
                         result.Set("mode", "html");
                         result.Set("html", html ? *html : "");
                         std::move(done).Run(base::Value(std::move(result)));
@@ -274,21 +274,21 @@ void PageContentTool::OnGetOuterHtmlResponse(
     base::Value response) {
   if (!response.is_dict()) {
     LOG(ERROR) << "[PageContentTool] DOM.getOuterHTML 응답 오류";
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "DOM.getOuterHTML 실패");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
   }
 
-  const base::Value::Dict& dict = response.GetDict();
+  const base::DictValue& dict = response.GetDict();
 
   // CDP 오류 확인
-  const base::Value::Dict* error_dict = dict.FindDict("error");
+  const base::DictValue* error_dict = dict.FindDict("error");
   if (error_dict) {
     const std::string* msg = error_dict->FindString("message");
     std::string error_msg = msg ? *msg : "알 수 없는 CDP 오류";
     LOG(ERROR) << "[PageContentTool] getOuterHTML CDP 오류: " << error_msg;
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", error_msg);
     std::move(callback).Run(base::Value(std::move(err)));
     return;
@@ -298,7 +298,7 @@ void PageContentTool::OnGetOuterHtmlResponse(
   LOG(INFO) << "[PageContentTool] HTML 취득 성공, 길이="
             << (html ? html->size() : 0);
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("mode", "html");
   result.Set("html", html ? *html : "");
   std::move(callback).Run(base::Value(std::move(result)));
@@ -332,7 +332,7 @@ void PageContentTool::FetchTextContent(
 
   LOG(INFO) << "[PageContentTool] Runtime.evaluate 호출 (Runtime.enable 미사용)";
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("expression", expression);
   // returnByValue=true: 결과를 직렬화된 값으로 반환
   params.Set("returnByValue", true);
@@ -350,43 +350,43 @@ void PageContentTool::OnEvaluateResponse(
     base::Value response) {
   if (!response.is_dict()) {
     LOG(ERROR) << "[PageContentTool] Runtime.evaluate 응답 오류";
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "Runtime.evaluate 실패");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
   }
 
-  const base::Value::Dict& dict = response.GetDict();
+  const base::DictValue& dict = response.GetDict();
 
   // CDP 레벨 오류 확인
-  const base::Value::Dict* error_dict = dict.FindDict("error");
+  const base::DictValue* error_dict = dict.FindDict("error");
   if (error_dict) {
     const std::string* msg = error_dict->FindString("message");
     std::string error_msg = msg ? *msg : "알 수 없는 CDP 오류";
     LOG(ERROR) << "[PageContentTool] Runtime.evaluate CDP 오류: " << error_msg;
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", error_msg);
     std::move(callback).Run(base::Value(std::move(err)));
     return;
   }
 
   // JS 런타임 예외 확인: exceptionDetails 필드가 있으면 JS 오류 발생
-  const base::Value::Dict* exception = dict.FindDict("exceptionDetails");
+  const base::DictValue* exception = dict.FindDict("exceptionDetails");
   if (exception) {
     const std::string* ex_text = exception->FindString("text");
     std::string ex_msg = ex_text ? *ex_text : "JS 실행 오류";
     LOG(WARNING) << "[PageContentTool] JS 예외: " << ex_msg;
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "JS 실행 오류: " + ex_msg);
     std::move(callback).Run(base::Value(std::move(err)));
     return;
   }
 
   // 정상 결과: result.value에 문자열이 담겨 있음
-  const base::Value::Dict* result_obj = dict.FindDict("result");
+  const base::DictValue* result_obj = dict.FindDict("result");
   if (!result_obj) {
     LOG(WARNING) << "[PageContentTool] Runtime.evaluate 결과 없음";
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("mode", "text");
     result.Set("text", "");
     std::move(callback).Run(base::Value(std::move(result)));
@@ -398,7 +398,7 @@ void PageContentTool::OnEvaluateResponse(
   if (type && *type == "null") {
     // selector에 해당하는 요소가 없어 null 반환된 경우
     LOG(WARNING) << "[PageContentTool] selector 요소 없음, null 반환됨";
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("mode", "text");
     result.Set("text", "");
     result.Set("warning", "해당 selector의 요소를 찾을 수 없음");
@@ -411,7 +411,7 @@ void PageContentTool::OnEvaluateResponse(
 
   LOG(INFO) << "[PageContentTool] 텍스트 취득 성공, 길이=" << text.size();
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("mode", "text");
   result.Set("text", text);
   std::move(callback).Run(base::Value(std::move(result)));

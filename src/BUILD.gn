@@ -117,9 +117,6 @@ source_set("mcp") {
     # 브라우저 공개 API (WebContents, DevToolsAgentHost 등)
     "//content/public/browser",
 
-    # Chrome DevTools Protocol 지원
-    "//content/browser/devtools",
-
     # CDP JSON 직렬화
     "//third_party/inspector_protocol:crdtp",
 

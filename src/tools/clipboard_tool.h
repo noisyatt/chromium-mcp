@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "base/functional/callback.h"
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_tool_registry.h"
 
@@ -34,18 +35,19 @@ class ClipboardTool : public McpTool {
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
+  base::DictValue input_schema() const override;
 
-  // Execute는 동기적으로 완료된다 (ui::Clipboard API는 동기식).
-  // callback은 즉시 호출된다.
-  void Execute(const base::Value::Dict& arguments,
+  // Execute는 read 액션의 경우 ReadText() callback을 통해 비동기적으로 완료된다.
+  // write 액션은 동기적으로 즉시 완료된다.
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 
  private:
   // action=read 처리.
-  // ui::Clipboard::GetForCurrentThread()->ReadText()로 클립보드 텍스트를 읽는다.
-  base::Value HandleRead();
+  // ui::Clipboard::GetForCurrentThread()->ReadText() callback을 통해
+  // 클립보드 텍스트를 읽고 callback을 호출한다.
+  void HandleRead(base::OnceCallback<void(base::Value)> callback);
 
   // action=write 처리.
   // ui::ScopedClipboardWriter를 사용하여 텍스트를 클립보드에 쓴다.

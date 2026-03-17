@@ -35,14 +35,14 @@ namespace mcp {
 //   - Page.downloadProgress     : 다운로드 진행률 이벤트
 class DownloadTool : public McpTool {
  public:
-  DownloadTool() = default;
-  ~DownloadTool() override = default;
+  DownloadTool();
+  ~DownloadTool() override;
 
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
-  void Execute(const base::Value::Dict& arguments,
+  base::DictValue input_schema() const override;
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 

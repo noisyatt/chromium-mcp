@@ -19,9 +19,9 @@ namespace {
 
 // MCP 성공 응답 Value 생성
 base::Value MakeSuccessResult(const std::string& message) {
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue item;
   item.Set("type", "text");
   item.Set("text", message);
   content.Append(std::move(item));
@@ -32,9 +32,9 @@ base::Value MakeSuccessResult(const std::string& message) {
 
 // MCP 에러 응답 Value 생성
 base::Value MakeErrorResult(const std::string& message) {
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue item;
   item.Set("type", "text");
   item.Set("text", message);
   content.Append(std::move(item));
@@ -45,7 +45,7 @@ base::Value MakeErrorResult(const std::string& message) {
 
 // CDP 응답 Dict에 "error" 키가 있는지 확인한다.
 bool HasCdpError(const base::Value& response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     return true;
   }
@@ -54,11 +54,11 @@ bool HasCdpError(const base::Value& response) {
 
 // CDP 응답에서 에러 메시지를 추출한다.
 std::string ExtractCdpErrorMessage(const base::Value& response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     return "CDP 응답이 Dict 형식이 아님";
   }
-  const base::Value::Dict* error = dict->FindDict("error");
+  const base::DictValue* error = dict->FindDict("error");
   if (!error) {
     return "알 수 없는 CDP 에러";
   }
@@ -163,10 +163,10 @@ std::string KeyNameToCode(const std::string& key) {
 }
 
 // Input.dispatchKeyEvent 파라미터 Dict 생성
-base::Value::Dict MakeKeyEventParams(const std::string& event_type,
+base::DictValue MakeKeyEventParams(const std::string& event_type,
                                      const std::string& key,
                                      int modifiers) {
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("type", event_type);
   params.Set("key", key);
   params.Set("code", KeyNameToCode(key));
@@ -200,16 +200,16 @@ std::string KeyboardTool::description() const {
          "modifiers 배열로 ctrl, alt, shift, meta 조합이 가능합니다.";
 }
 
-base::Value::Dict KeyboardTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue KeyboardTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // action: "type", "press", "shortcut"
-  base::Value::Dict action_prop;
+  base::DictValue action_prop;
   action_prop.Set("type", "string");
-  base::Value::List action_enum;
+  base::ListValue action_enum;
   action_enum.Append("type");
   action_enum.Append("press");
   action_enum.Append("shortcut");
@@ -221,7 +221,7 @@ base::Value::Dict KeyboardTool::input_schema() const {
   properties.Set("action", std::move(action_prop));
 
   // text: action=type 일 때 입력할 텍스트
-  base::Value::Dict text_prop;
+  base::DictValue text_prop;
   text_prop.Set("type", "string");
   text_prop.Set("description",
                 "action=type 일 때 입력할 텍스트. 한글·이모지 포함 가능. "
@@ -229,7 +229,7 @@ base::Value::Dict KeyboardTool::input_schema() const {
   properties.Set("text", std::move(text_prop));
 
   // key: action=press/shortcut 일 때 키 이름
-  base::Value::Dict key_prop;
+  base::DictValue key_prop;
   key_prop.Set("type", "string");
   key_prop.Set("description",
                "action=press/shortcut 일 때 키 이름. "
@@ -237,11 +237,11 @@ base::Value::Dict KeyboardTool::input_schema() const {
   properties.Set("key", std::move(key_prop));
 
   // modifiers: 조합키 배열
-  base::Value::Dict modifiers_prop;
+  base::DictValue modifiers_prop;
   modifiers_prop.Set("type", "array");
-  base::Value::Dict modifiers_items;
+  base::DictValue modifiers_items;
   modifiers_items.Set("type", "string");
-  base::Value::List modifiers_enum;
+  base::ListValue modifiers_enum;
   modifiers_enum.Append("ctrl");
   modifiers_enum.Append("alt");
   modifiers_enum.Append("shift");
@@ -254,7 +254,7 @@ base::Value::Dict KeyboardTool::input_schema() const {
   properties.Set("modifiers", std::move(modifiers_prop));
 
   // delay: type 모드에서 각 문자 사이 딜레이 (ms)
-  base::Value::Dict delay_prop;
+  base::DictValue delay_prop;
   delay_prop.Set("type", "number");
   delay_prop.Set("default", 0);
   delay_prop.Set("description",
@@ -266,14 +266,14 @@ base::Value::Dict KeyboardTool::input_schema() const {
   schema.Set("properties", std::move(properties));
 
   // action은 필수
-  base::Value::List required;
+  base::ListValue required;
   required.Append("action");
   schema.Set("required", std::move(required));
 
   return schema;
 }
 
-void KeyboardTool::Execute(const base::Value::Dict& arguments,
+void KeyboardTool::Execute(const base::DictValue& arguments,
                            McpSession* session,
                            base::OnceCallback<void(base::Value)> callback) {
   const std::string* action = arguments.FindString("action");
@@ -317,7 +317,7 @@ void KeyboardTool::Execute(const base::Value::Dict& arguments,
     }
 
     // modifiers 비트 플래그 계산
-    const base::Value::List* modifiers_list = arguments.FindList("modifiers");
+    const base::ListValue* modifiers_list = arguments.FindList("modifiers");
     int modifiers = ComputeModifiers(modifiers_list);
 
     LOG(INFO) << "[KeyboardTool] " << *action << " 모드: key=" << *key
@@ -335,7 +335,7 @@ void KeyboardTool::Execute(const base::Value::Dict& arguments,
 void KeyboardTool::ExecuteType(const std::string& text,
                                McpSession* session,
                                base::OnceCallback<void(base::Value)> callback) {
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("text", text);
 
   session->SendCdpCommand(
@@ -377,7 +377,7 @@ void KeyboardTool::DispatchNextChar(
   std::string current_char(1, remaining_text[0]);
   std::string rest = remaining_text.substr(1);
 
-  base::Value::Dict params = MakeKeyEventParams("keyDown", current_char, 0);
+  base::DictValue params = MakeKeyEventParams("keyDown", current_char, 0);
   // 단일 문자 키에 text 필드 추가 (브라우저 입력 처리용)
   params.Set("text", current_char);
 
@@ -403,7 +403,7 @@ void KeyboardTool::OnCharKeyDown(
   // keyDown 완료 후 현재 문자 역추적: remaining_text는 이미 다음 문자들이므로
   // keyUp을 위해 직전 문자를 알 수 없음 → 단순히 키업 발송
   // (실제로 keyUp의 key 값은 입력에 영향 없음)
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("type", "keyUp");
   params.Set("key", "Unidentified");
   params.Set("code", "");
@@ -460,7 +460,7 @@ void KeyboardTool::ExecutePress(const std::string& key,
                                 int modifiers,
                                 McpSession* session,
                                 base::OnceCallback<void(base::Value)> callback) {
-  base::Value::Dict params = MakeKeyEventParams("keyDown", key, modifiers);
+  base::DictValue params = MakeKeyEventParams("keyDown", key, modifiers);
 
   session->SendCdpCommand(
       "Input.dispatchKeyEvent", std::move(params),
@@ -479,7 +479,7 @@ void KeyboardTool::OnKeyDown(const std::string& key,
     return;
   }
 
-  base::Value::Dict params = MakeKeyEventParams("keyUp", key, modifiers);
+  base::DictValue params = MakeKeyEventParams("keyUp", key, modifiers);
 
   session->SendCdpCommand(
       "Input.dispatchKeyEvent", std::move(params),
@@ -501,7 +501,7 @@ void KeyboardTool::OnKeyUp(base::OnceCallback<void(base::Value)> callback,
 // modifiers 문자열 배열 → CDP 비트 플래그 정수
 // CDP 규격: Alt=1, Ctrl=2, Meta=4, Shift=8
 // NOLINTNEXTLINE(runtime/references)
-int KeyboardTool::ComputeModifiers(const base::Value::List* modifiers_list) {
+int KeyboardTool::ComputeModifiers(const base::ListValue* modifiers_list) {
   if (!modifiers_list) {
     return 0;
   }

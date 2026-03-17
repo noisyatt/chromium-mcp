@@ -41,23 +41,26 @@ class ElementInfoTool : public McpTool {
   // McpTool 인터페이스 구현
   std::string name() const override;
   std::string description() const override;
-  base::Value::Dict input_schema() const override;
-  void Execute(const base::Value::Dict& arguments,
+  base::DictValue input_schema() const override;
+  void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;
 
- private:
+ public:
   // 조회 실행 컨텍스트.
   // nodeId 획득 후 각 property를 순차적으로 조회한다.
   struct QueryContext {
+    QueryContext();
+    ~QueryContext();
     std::string selector;
     std::set<std::string> properties;  // 조회할 property 목록
     int node_id = 0;                   // DOM.querySelector로 획득한 nodeId
-    base::Value::Dict result;          // 최종 결과 누적
+    base::DictValue result;          // 최종 결과 누적
     McpSession* session;               // raw pointer
     base::OnceCallback<void(base::Value)> callback;
   };
 
+ private:
   // DOM.getDocument 응답 처리 후 DOM.querySelector를 호출한다.
   void OnGetDocumentResponse(std::shared_ptr<QueryContext> ctx,
                               base::Value response);

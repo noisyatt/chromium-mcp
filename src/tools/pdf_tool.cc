@@ -34,15 +34,15 @@ std::string PdfTool::description() const {
   return "현재 페이지를 PDF로 저장";
 }
 
-base::Value::Dict PdfTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue PdfTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // savePath: 저장 경로. 없으면 base64 데이터를 응답으로 반환.
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "string");
     prop.Set("description",
              "PDF 저장 경로 (예: \"/tmp/page.pdf\"). "
@@ -52,7 +52,7 @@ base::Value::Dict PdfTool::input_schema() const {
 
   // landscape: 가로 방향 출력 여부 (기본값: false = 세로)
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "boolean");
     prop.Set("description", "가로 방향 출력 여부 (기본값: false)");
     prop.Set("default", false);
@@ -61,7 +61,7 @@ base::Value::Dict PdfTool::input_schema() const {
 
   // printBackground: 배경색/배경 이미지 포함 여부 (기본값: true)
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "boolean");
     prop.Set("description", "배경색 및 배경 이미지 포함 여부 (기본값: true)");
     prop.Set("default", true);
@@ -70,7 +70,7 @@ base::Value::Dict PdfTool::input_schema() const {
 
   // scale: 페이지 스케일 (0.1 ~ 2.0, 기본값: 1.0)
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "number");
     prop.Set("description",
              "페이지 출력 스케일 (기본값: 1.0, 범위: 0.1~2.0)");
@@ -82,7 +82,7 @@ base::Value::Dict PdfTool::input_schema() const {
 
   // paperWidth: 용지 너비 인치 (기본값: 8.5)
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "number");
     prop.Set("description",
              "용지 너비 인치 단위 (기본값: 8.5 = US Letter)");
@@ -92,7 +92,7 @@ base::Value::Dict PdfTool::input_schema() const {
 
   // paperHeight: 용지 높이 인치 (기본값: 11.0)
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "number");
     prop.Set("description",
              "용지 높이 인치 단위 (기본값: 11.0 = US Letter)");
@@ -102,7 +102,7 @@ base::Value::Dict PdfTool::input_schema() const {
 
   // marginTop: 위쪽 여백 인치 (기본값: 0.4)
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "number");
     prop.Set("description", "위쪽 여백 인치 (기본값: 0.4)");
     prop.Set("default", kDefaultMargin);
@@ -111,7 +111,7 @@ base::Value::Dict PdfTool::input_schema() const {
 
   // marginRight: 오른쪽 여백 인치 (기본값: 0.4)
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "number");
     prop.Set("description", "오른쪽 여백 인치 (기본값: 0.4)");
     prop.Set("default", kDefaultMargin);
@@ -120,7 +120,7 @@ base::Value::Dict PdfTool::input_schema() const {
 
   // marginBottom: 아래쪽 여백 인치 (기본값: 0.4)
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "number");
     prop.Set("description", "아래쪽 여백 인치 (기본값: 0.4)");
     prop.Set("default", kDefaultMargin);
@@ -129,7 +129,7 @@ base::Value::Dict PdfTool::input_schema() const {
 
   // marginLeft: 왼쪽 여백 인치 (기본값: 0.4)
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "number");
     prop.Set("description", "왼쪽 여백 인치 (기본값: 0.4)");
     prop.Set("default", kDefaultMargin);
@@ -138,7 +138,7 @@ base::Value::Dict PdfTool::input_schema() const {
 
   // pageRanges: 인쇄할 페이지 범위 ("1-5, 8" 형식, 생략 시 전체)
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "string");
     prop.Set("description",
              "인쇄할 페이지 범위 (예: \"1-5, 8\"). 생략 시 전체 페이지.");
@@ -148,7 +148,7 @@ base::Value::Dict PdfTool::input_schema() const {
   // headerTemplate: 머리글 HTML 템플릿
   // 사용 가능한 CSS 클래스: date, title, url, pageNumber, totalPages
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "string");
     prop.Set("description",
              "머리글 HTML 템플릿. CSS 클래스: date, title, url, "
@@ -158,7 +158,7 @@ base::Value::Dict PdfTool::input_schema() const {
 
   // footerTemplate: 바닥글 HTML 템플릿
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "string");
     prop.Set("description",
              "바닥글 HTML 템플릿. CSS 클래스: date, title, url, "
@@ -168,7 +168,7 @@ base::Value::Dict PdfTool::input_schema() const {
 
   // displayHeaderFooter: 머리글/바닥글 표시 여부 (기본값: false)
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "boolean");
     prop.Set("description",
              "머리글/바닥글 표시 여부 (기본값: false). "
@@ -179,7 +179,7 @@ base::Value::Dict PdfTool::input_schema() const {
 
   // preferCSSPageSize: CSS @page 크기를 paperWidth/paperHeight보다 우선 적용
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "boolean");
     prop.Set("description",
              "CSS @page 크기를 paperWidth/paperHeight보다 우선 적용 여부 "
@@ -192,7 +192,7 @@ base::Value::Dict PdfTool::input_schema() const {
   return schema;
 }
 
-void PdfTool::Execute(const base::Value::Dict& arguments,
+void PdfTool::Execute(const base::DictValue& arguments,
                       McpSession* session,
                       base::OnceCallback<void(base::Value)> callback) {
   // 저장 경로 추출 (없으면 빈 문자열 → base64 반환)
@@ -202,7 +202,7 @@ void PdfTool::Execute(const base::Value::Dict& arguments,
   // -----------------------------------------------------------------------
   // CDP Page.printToPDF 파라미터 구성
   // -----------------------------------------------------------------------
-  base::Value::Dict params;
+  base::DictValue params;
 
   // landscape: 가로/세로 방향 (기본값: false)
   params.Set("landscape", arguments.FindBool("landscape").value_or(false));
@@ -280,21 +280,21 @@ void PdfTool::OnPrintToPdfResponse(
     base::Value response) {
   if (!response.is_dict()) {
     LOG(ERROR) << "[PdfTool] Page.printToPDF 응답 형식 오류";
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "Page.printToPDF 응답 형식 오류");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
   }
 
-  const base::Value::Dict& dict = response.GetDict();
+  const base::DictValue& dict = response.GetDict();
 
   // CDP 오류 응답 확인
-  const base::Value::Dict* err_dict = dict.FindDict("error");
+  const base::DictValue* err_dict = dict.FindDict("error");
   if (err_dict) {
     const std::string* msg = err_dict->FindString("message");
     std::string err_msg = msg ? *msg : "PDF 변환 실패";
     LOG(ERROR) << "[PdfTool] CDP 오류: " << err_msg;
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error", err_msg);
     std::move(callback).Run(base::Value(std::move(result)));
@@ -303,7 +303,7 @@ void PdfTool::OnPrintToPdfResponse(
 
   // PDF base64 데이터 추출
   // Page.printToPDF 응답: {"result": {"data": "<base64>", "stream": ...}}
-  const base::Value::Dict* result_dict = dict.FindDict("result");
+  const base::DictValue* result_dict = dict.FindDict("result");
   const std::string* b64_data = nullptr;
   if (result_dict) {
     b64_data = result_dict->FindString("data");
@@ -315,7 +315,7 @@ void PdfTool::OnPrintToPdfResponse(
 
   if (!b64_data || b64_data->empty()) {
     LOG(WARNING) << "[PdfTool] PDF 데이터가 비어있음";
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error", "PDF 데이터가 비어있습니다");
     std::move(callback).Run(base::Value(std::move(result)));
@@ -332,7 +332,7 @@ void PdfTool::OnPrintToPdfResponse(
     std::string pdf_bytes;
     if (!base::Base64Decode(*b64_data, &pdf_bytes)) {
       LOG(ERROR) << "[PdfTool] base64 디코딩 실패";
-      base::Value::Dict result;
+      base::DictValue result;
       result.Set("success", false);
       result.Set("error", "PDF 데이터 디코딩에 실패했습니다");
       std::move(callback).Run(base::Value(std::move(result)));
@@ -345,7 +345,7 @@ void PdfTool::OnPrintToPdfResponse(
     bool write_ok = base::WriteFile(file_path, pdf_bytes);
     if (!write_ok) {
       LOG(ERROR) << "[PdfTool] 파일 저장 실패: " << save_path;
-      base::Value::Dict result;
+      base::DictValue result;
       result.Set("success", false);
       result.Set("error", "파일 저장에 실패했습니다: " + save_path);
       std::move(callback).Run(base::Value(std::move(result)));
@@ -355,7 +355,7 @@ void PdfTool::OnPrintToPdfResponse(
     LOG(INFO) << "[PdfTool] PDF 파일 저장 완료: " << save_path
               << " (" << pdf_bytes.size() << " bytes)";
 
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", true);
     result.Set("savePath", save_path);
     result.Set("size", static_cast<int>(pdf_bytes.size()));
@@ -367,7 +367,7 @@ void PdfTool::OnPrintToPdfResponse(
   // -------------------------------------------------------------------------
   // savePath 미지정: base64 데이터를 그대로 응답으로 반환
   // -------------------------------------------------------------------------
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success", true);
   result.Set("data", *b64_data);  // base64 인코딩된 PDF
   result.Set("mimeType", "application/pdf");

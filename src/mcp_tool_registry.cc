@@ -57,10 +57,10 @@ size_t McpToolRegistry::GetToolCount() const {
 
 base::Value McpToolRegistry::BuildToolListResponse() const {
   // 도구 목록을 List 형태로 직렬화하여 반환한다.
-  base::Value::List tools_list;
+  base::ListValue tools_list;
 
   for (const auto& [name, tool] : tools_) {
-    base::Value::Dict tool_entry;
+    base::DictValue tool_entry;
     tool_entry.Set("name", tool->name());
     tool_entry.Set("description", tool->description());
     tool_entry.Set("inputSchema", tool->input_schema());
@@ -72,7 +72,7 @@ base::Value McpToolRegistry::BuildToolListResponse() const {
 
 void McpToolRegistry::DispatchToolCall(
     const std::string& tool_name,
-    const base::Value::Dict& arguments,
+    const base::DictValue& arguments,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) const {
   McpTool* tool = GetTool(tool_name);
@@ -82,12 +82,12 @@ void McpToolRegistry::DispatchToolCall(
     LOG(WARNING) << "[MCP] DispatchToolCall: 알 수 없는 도구 '" << tool_name
                  << "'";
 
-    base::Value::Dict error;
+    base::DictValue error;
     error.Set("code", -32601);  // Method not found (JSON-RPC 표준 에러 코드)
     error.Set("message",
               "Unknown tool: " + tool_name);
 
-    base::Value::Dict response;
+    base::DictValue response;
     response.Set("error", std::move(error));
     std::move(callback).Run(base::Value(std::move(response)));
     return;

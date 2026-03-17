@@ -51,17 +51,17 @@ std::string PerformanceTool::description() const {
          "Navigation Timing API 조회를 지원한다.";
 }
 
-base::Value::Dict PerformanceTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue PerformanceTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // action
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "string");
-    base::Value::List enums;
+    base::ListValue enums;
     enums.Append("getMetrics");
     enums.Append("startTrace");
     enums.Append("stopTrace");
@@ -78,7 +78,7 @@ base::Value::Dict PerformanceTool::input_schema() const {
 
   // categories: 트레이스 카테고리 (startTrace 시 사용)
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "string");
     prop.Set("description",
              "트레이스 카테고리 (쉼표로 구분). "
@@ -90,7 +90,7 @@ base::Value::Dict PerformanceTool::input_schema() const {
 
   // savePath: 트레이스 결과 저장 경로 (stopTrace 시 사용)
   {
-    base::Value::Dict prop;
+    base::DictValue prop;
     prop.Set("type", "string");
     prop.Set("description",
              "트레이스 데이터를 저장할 파일 경로 (JSON 형식). "
@@ -100,19 +100,19 @@ base::Value::Dict PerformanceTool::input_schema() const {
 
   schema.Set("properties", std::move(properties));
 
-  base::Value::List required;
+  base::ListValue required;
   required.Append("action");
   schema.Set("required", std::move(required));
 
   return schema;
 }
 
-void PerformanceTool::Execute(const base::Value::Dict& arguments,
+void PerformanceTool::Execute(const base::DictValue& arguments,
                                McpSession* session,
                                base::OnceCallback<void(base::Value)> callback) {
   const std::string* action_ptr = arguments.FindString("action");
   if (!action_ptr) {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "action 파라미터가 필요합니다");
     std::move(callback).Run(base::Value(std::move(err)));
     return;
@@ -138,7 +138,7 @@ void PerformanceTool::Execute(const base::Value::Dict& arguments,
     ExecuteGetNavigationTiming(session, std::move(callback));
 
   } else {
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("error", "알 수 없는 action: " + action);
     std::move(callback).Run(base::Value(std::move(err)));
   }
@@ -163,7 +163,7 @@ void PerformanceTool::ExecuteGetMetrics(
   LOG(INFO) << "[PerformanceTool] Performance.getMetrics 호출";
 
   session->SendCdpCommand(
-      "Performance.getMetrics", base::Value::Dict(),
+      "Performance.getMetrics", base::DictValue(),
       base::BindOnce(&PerformanceTool::OnMetricsReceived,
                      weak_factory_.GetWeakPtr(), std::move(callback)));
 }
@@ -172,34 +172,34 @@ void PerformanceTool::OnMetricsReceived(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
   if (!response.is_dict()) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("error", "예상치 못한 CDP 응답 형식");
     std::move(callback).Run(base::Value(std::move(result)));
     return;
   }
 
-  const base::Value::Dict& dict = response.GetDict();
+  const base::DictValue& dict = response.GetDict();
 
   // CDP 오류 확인
-  const base::Value::Dict* err = dict.FindDict("error");
+  const base::DictValue* err = dict.FindDict("error");
   if (err) {
     const std::string* msg = err->FindString("message");
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("error", msg ? *msg : "Performance.getMetrics 실패");
     std::move(callback).Run(base::Value(std::move(result)));
     return;
   }
 
   // result.metrics 배열 추출
-  const base::Value::Dict* res = dict.FindDict("result");
+  const base::DictValue* res = dict.FindDict("result");
   if (res) {
-    const base::Value::List* metrics = res->FindList("metrics");
+    const base::ListValue* metrics = res->FindList("metrics");
     if (metrics) {
       // 주요 메트릭 요약 맵 생성
-      base::Value::Dict summary;
+      base::DictValue summary;
       for (const auto& item : *metrics) {
         if (!item.is_dict()) continue;
-        const base::Value::Dict& m = item.GetDict();
+        const base::DictValue& m = item.GetDict();
         const std::string* name = m.FindString("name");
         std::optional<double> value = m.FindDouble("value");
         if (name && value.has_value()) {
@@ -210,7 +210,7 @@ void PerformanceTool::OnMetricsReceived(
       LOG(INFO) << "[PerformanceTool] 성능 메트릭 수집 완료, count="
                 << metrics->size();
 
-      base::Value::Dict result;
+      base::DictValue result;
       result.Set("success", true);
       result.Set("metrics", metrics->Clone());
       result.Set("summary", std::move(summary));
@@ -219,9 +219,9 @@ void PerformanceTool::OnMetricsReceived(
     }
   }
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success", true);
-  result.Set("metrics", base::Value::List());
+  result.Set("metrics", base::ListValue());
   result.Set("warning",
              "성능 메트릭을 찾을 수 없습니다. "
              "Performance.enable이 필요할 수 있습니다.");
@@ -237,7 +237,7 @@ void PerformanceTool::ExecuteStartTrace(
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   if (is_tracing_) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error", "이미 트레이스가 진행 중입니다. stopTrace를 먼저 호출하세요.");
     std::move(callback).Run(base::Value(std::move(result)));
@@ -256,11 +256,11 @@ void PerformanceTool::ExecuteStartTrace(
                           weak_factory_.GetWeakPtr()));
 
   // traceConfig 설정
-  base::Value::Dict trace_config;
+  base::DictValue trace_config;
   trace_config.Set("recordMode", "recordUntilFull");
   trace_config.Set("includedCategories", ParseCategories(categories));
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("traceConfig", std::move(trace_config));
   // 1초마다 버퍼 사용량 보고 (버퍼 오버플로 조기 감지)
   params.Set("bufferUsageReportingInterval", 1000);
@@ -277,7 +277,7 @@ void PerformanceTool::OnTraceStarted(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
   if (response.is_dict()) {
-    const base::Value::Dict* err = response.GetDict().FindDict("error");
+    const base::DictValue* err = response.GetDict().FindDict("error");
     if (err) {
       const std::string* msg = err->FindString("message");
       LOG(ERROR) << "[PerformanceTool] 트레이스 시작 실패: "
@@ -289,7 +289,7 @@ void PerformanceTool::OnTraceStarted(
         tracing_session_ = nullptr;
       }
 
-      base::Value::Dict result;
+      base::DictValue result;
       result.Set("success", false);
       result.Set("error", msg ? *msg : "트레이스 시작 실패");
       std::move(callback).Run(base::Value(std::move(result)));
@@ -300,7 +300,7 @@ void PerformanceTool::OnTraceStarted(
   is_tracing_ = true;
   LOG(INFO) << "[PerformanceTool] 트레이스 녹화 시작됨";
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success", true);
   result.Set("message",
              "트레이스 녹화가 시작되었습니다. "
@@ -315,14 +315,14 @@ void PerformanceTool::OnTraceStarted(
 
 void PerformanceTool::OnTraceDataCollected(
     const std::string& event_name,
-    const base::Value::Dict& params) {
+    const base::DictValue& params) {
   // Tracing.dataCollected 이벤트 파라미터:
   //   value: TraceEvent[] — 트레이스 이벤트 배열 (청크)
   //
   // 트레이스 데이터는 버퍼 크기에 따라 여러 청크로 분할 전달된다.
   // 모든 청크를 trace_chunks_에 누적하고 Tracing.tracingComplete 이벤트
   // 수신 시 합산하여 반환한다.
-  const base::Value::List* value = params.FindList("value");
+  const base::ListValue* value = params.FindList("value");
   if (value) {
     trace_chunks_.push_back(value->Clone());
     VLOG(1) << "[PerformanceTool] 트레이스 청크 수신: "
@@ -336,7 +336,7 @@ void PerformanceTool::OnTraceDataCollected(
 
 void PerformanceTool::OnTracingComplete(
     const std::string& event_name,
-    const base::Value::Dict& params) {
+    const base::DictValue& params) {
   // Tracing.tracingComplete 이벤트 파라미터:
   //   dataLossOccurred: bool — 버퍼 오버플로로 데이터 손실 여부
   //   stream: string — IO 스트림 핸들 (stream 모드 사용 시)
@@ -356,7 +356,7 @@ void PerformanceTool::OnTracingComplete(
   is_tracing_ = false;
 
   // 누적된 청크를 하나의 배열로 합산
-  base::Value::List all_events;
+  base::ListValue all_events;
   int total_events = 0;
   for (auto& chunk : trace_chunks_) {
     total_events += static_cast<int>(chunk.size());
@@ -374,7 +374,7 @@ void PerformanceTool::OnTracingComplete(
     std::string saved_path = save_path_;
 
     // {traceEvents: [...]} 형식으로 직렬화
-    base::Value::Dict trace_doc;
+    base::DictValue trace_doc;
     trace_doc.Set("traceEvents", std::move(all_events));
 
     std::string json_str;
@@ -391,7 +391,7 @@ void PerformanceTool::OnTracingComplete(
     save_path_.clear();
 
     if (stop_trace_callback_) {
-      base::Value::Dict result;
+      base::DictValue result;
       result.Set("success", true);
       result.Set("message", "트레이스 녹화가 완료되었습니다");
       result.Set("eventCount", total_events);
@@ -405,7 +405,7 @@ void PerformanceTool::OnTracingComplete(
 
   // savePath 미지정: 이벤트 배열을 응답에 직접 포함
   if (stop_trace_callback_) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", true);
     result.Set("message", "트레이스 녹화가 완료되었습니다");
     result.Set("eventCount", total_events);
@@ -424,7 +424,7 @@ void PerformanceTool::ExecuteStopTrace(
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   if (!is_tracing_) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("success", false);
     result.Set("error",
                "진행 중인 트레이스가 없습니다. startTrace를 먼저 호출하세요.");
@@ -446,7 +446,7 @@ void PerformanceTool::ExecuteStopTrace(
   LOG(INFO) << "[PerformanceTool] Tracing.end 호출";
 
   session->SendCdpCommand(
-      "Tracing.end", base::Value::Dict(),
+      "Tracing.end", base::DictValue(),
       base::BindOnce(&PerformanceTool::OnTraceEnded,
                      weak_factory_.GetWeakPtr(),
                      // stopTrace의 최종 결과는 OnTracingComplete에서 반환되므로
@@ -460,7 +460,7 @@ void PerformanceTool::OnTraceEnded(
   // Tracing.end 응답에서 오류가 발생한 경우에만 처리한다.
   // 정상 케이스에서는 이후 Tracing.tracingComplete 이벤트로 데이터가 전달된다.
   if (response.is_dict()) {
-    const base::Value::Dict* err = response.GetDict().FindDict("error");
+    const base::DictValue* err = response.GetDict().FindDict("error");
     if (err) {
       const std::string* msg = err->FindString("message");
       LOG(ERROR) << "[PerformanceTool] Tracing.end 오류: "
@@ -477,7 +477,7 @@ void PerformanceTool::OnTraceEnded(
       save_path_.clear();
 
       if (stop_trace_callback_) {
-        base::Value::Dict result;
+        base::DictValue result;
         result.Set("success", false);
         result.Set("error", msg ? *msg : "Tracing.end 실패");
         std::move(stop_trace_callback_).Run(base::Value(std::move(result)));
@@ -499,7 +499,7 @@ void PerformanceTool::ExecuteGetNavigationTiming(
   LOG(INFO) << "[PerformanceTool] Performance.enable 호출";
 
   session->SendCdpCommand(
-      "Performance.enable", base::Value::Dict(),
+      "Performance.enable", base::DictValue(),
       base::BindOnce(&PerformanceTool::OnPerformanceEnabled,
                      weak_factory_.GetWeakPtr(), session,
                      std::move(callback)));
@@ -511,7 +511,7 @@ void PerformanceTool::OnPerformanceEnabled(
     base::Value response) {
   // Performance.enable 오류 무시: 이미 활성화된 경우도 있으므로 계속 진행한다.
   if (response.is_dict()) {
-    const base::Value::Dict* err = response.GetDict().FindDict("error");
+    const base::DictValue* err = response.GetDict().FindDict("error");
     if (err) {
       LOG(WARNING) << "[PerformanceTool] Performance.enable 경고 (무시하고 계속)";
     }
@@ -563,7 +563,7 @@ void PerformanceTool::OnPerformanceEnabled(
     })()
   )";
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("expression", kNavTimingScript);
   params.Set("returnByValue", true);
   params.Set("awaitPromise", false);
@@ -580,31 +580,31 @@ void PerformanceTool::OnNavigationTimingReceived(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
   if (!response.is_dict()) {
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("error", "예상치 못한 CDP 응답 형식");
     std::move(callback).Run(base::Value(std::move(result)));
     return;
   }
 
-  const base::Value::Dict& dict = response.GetDict();
-  const base::Value::Dict* err = dict.FindDict("error");
+  const base::DictValue& dict = response.GetDict();
+  const base::DictValue* err = dict.FindDict("error");
   if (err) {
     const std::string* msg = err->FindString("message");
-    base::Value::Dict result;
+    base::DictValue result;
     result.Set("error", msg ? *msg : "Runtime.evaluate 실패");
     std::move(callback).Run(base::Value(std::move(result)));
     return;
   }
 
   // Runtime.evaluate 응답: result.result.value에 JSON 문자열이 들어있다.
-  const base::Value::Dict* res = dict.FindDict("result");
+  const base::DictValue* res = dict.FindDict("result");
   if (res) {
-    const base::Value::Dict* inner_result = res->FindDict("result");
+    const base::DictValue* inner_result = res->FindDict("result");
     if (inner_result) {
       const std::string* value_str = inner_result->FindString("value");
       if (value_str) {
         LOG(INFO) << "[PerformanceTool] Navigation Timing 수집 완료";
-        base::Value::Dict result;
+        base::DictValue result;
         result.Set("success", true);
         result.Set("data", *value_str);
         std::move(callback).Run(base::Value(std::move(result)));
@@ -613,7 +613,7 @@ void PerformanceTool::OnNavigationTimingReceived(
     }
   }
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("success", false);
   result.Set("error", "Navigation Timing 데이터를 파싱할 수 없습니다");
   std::move(callback).Run(base::Value(std::move(result)));
@@ -624,9 +624,9 @@ void PerformanceTool::OnNavigationTimingReceived(
 // -----------------------------------------------------------------------
 
 // static
-base::Value::List PerformanceTool::ParseCategories(
+base::ListValue PerformanceTool::ParseCategories(
     const std::string& categories) {
-  base::Value::List list;
+  base::ListValue list;
   std::string remaining = categories;
 
   while (!remaining.empty()) {

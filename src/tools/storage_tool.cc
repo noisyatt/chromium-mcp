@@ -19,9 +19,9 @@ namespace {
 
 // MCP 성공 응답 Value 생성.
 base::Value MakeSuccessResult(const std::string& text) {
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue item;
   item.Set("type", "text");
   item.Set("text", text);
   content.Append(std::move(item));
@@ -32,9 +32,9 @@ base::Value MakeSuccessResult(const std::string& text) {
 
 // MCP 에러 응답 Value 생성.
 base::Value MakeErrorResult(const std::string& text) {
-  base::Value::Dict result;
-  base::Value::List content;
-  base::Value::Dict item;
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue item;
   item.Set("type", "text");
   item.Set("text", text);
   content.Append(std::move(item));
@@ -67,14 +67,14 @@ std::string EscapeForJsString(const std::string& input) {
 
 // Runtime.evaluate 응답에서 예외 정보를 추출한다.
 // exceptionDetails가 없으면 빈 문자열 반환.
-std::string ExtractExceptionMessage(const base::Value::Dict& result_dict) {
-  const base::Value::Dict* exception = result_dict.FindDict("exceptionDetails");
+std::string ExtractExceptionMessage(const base::DictValue& result_dict) {
+  const base::DictValue* exception = result_dict.FindDict("exceptionDetails");
   if (!exception) {
     return "";
   }
 
   // exceptionDetails.exception.description: 상세 에러 메시지 (스택 포함)
-  const base::Value::Dict* exc_obj = exception->FindDict("exception");
+  const base::DictValue* exc_obj = exception->FindDict("exception");
   if (exc_obj) {
     const std::string* desc = exc_obj->FindString("description");
     if (desc && !desc->empty()) {
@@ -92,7 +92,7 @@ std::string ExtractExceptionMessage(const base::Value::Dict& result_dict) {
 }
 
 // Runtime.evaluate result.result RemoteObject에서 값을 문자열로 변환.
-std::string RemoteObjectToString(const base::Value::Dict& remote_obj) {
+std::string RemoteObjectToString(const base::DictValue& remote_obj) {
   const base::Value* value = remote_obj.Find("value");
   if (value) {
     if (value->is_string()) {
@@ -155,17 +155,17 @@ std::string StorageTool::description() const {
          "storageType으로 localStorage(기본) 또는 sessionStorage를 선택합니다.";
 }
 
-base::Value::Dict StorageTool::input_schema() const {
-  base::Value::Dict schema;
+base::DictValue StorageTool::input_schema() const {
+  base::DictValue schema;
   schema.Set("type", "object");
 
-  base::Value::Dict properties;
+  base::DictValue properties;
 
   // action: 필수 파라미터
   {
-    base::Value::Dict action_prop;
+    base::DictValue action_prop;
     action_prop.Set("type", "string");
-    base::Value::List action_enum;
+    base::ListValue action_enum;
     action_enum.Append("get");
     action_enum.Append("set");
     action_enum.Append("remove");
@@ -180,9 +180,9 @@ base::Value::Dict StorageTool::input_schema() const {
 
   // storageType: localStorage 또는 sessionStorage (기본: local)
   {
-    base::Value::Dict type_prop;
+    base::DictValue type_prop;
     type_prop.Set("type", "string");
-    base::Value::List type_enum;
+    base::ListValue type_enum;
     type_enum.Append("local");
     type_enum.Append("session");
     type_prop.Set("enum", std::move(type_enum));
@@ -195,7 +195,7 @@ base::Value::Dict StorageTool::input_schema() const {
 
   // key: 키 이름 (get/set/remove 시 필수)
   {
-    base::Value::Dict key_prop;
+    base::DictValue key_prop;
     key_prop.Set("type", "string");
     key_prop.Set("description", "스토리지 키 이름. get/set/remove 시 필수.");
     properties.Set("key", std::move(key_prop));
@@ -203,7 +203,7 @@ base::Value::Dict StorageTool::input_schema() const {
 
   // value: 저장할 값 (set 시 필수)
   {
-    base::Value::Dict value_prop;
+    base::DictValue value_prop;
     value_prop.Set("type", "string");
     value_prop.Set("description", "저장할 문자열 값. set 시 필수.");
     properties.Set("value", std::move(value_prop));
@@ -212,7 +212,7 @@ base::Value::Dict StorageTool::input_schema() const {
   schema.Set("properties", std::move(properties));
 
   // action만 필수
-  base::Value::List required;
+  base::ListValue required;
   required.Append("action");
   schema.Set("required", std::move(required));
 
@@ -220,7 +220,7 @@ base::Value::Dict StorageTool::input_schema() const {
 }
 
 void StorageTool::Execute(
-    const base::Value::Dict& arguments,
+    const base::DictValue& arguments,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   const std::string* action = arguments.FindString("action");
@@ -322,7 +322,7 @@ void StorageTool::EvaluateStorageScript(
     const std::string& expression,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("expression", expression);
 
   // 결과를 JSON 직렬화 가능한 값으로 수신 (RemoteObjectId 대신)
@@ -356,7 +356,7 @@ void StorageTool::EvaluateStorageScript(
 void StorageTool::OnEvaluateResponse(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
-  const base::Value::Dict* dict = response.GetIfDict();
+  const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     LOG(ERROR) << "[StorageTool] Runtime.evaluate 응답이 Dict 형식이 아님";
     std::move(callback).Run(MakeErrorResult("Runtime.evaluate 응답 형식 오류"));
@@ -365,7 +365,7 @@ void StorageTool::OnEvaluateResponse(
 
   // CDP 전송 레벨 에러 (연결 실패, 프로토콜 오류 등)
   if (dict->Find("error") != nullptr) {
-    const base::Value::Dict* err = dict->FindDict("error");
+    const base::DictValue* err = dict->FindDict("error");
     const std::string* msg = err ? err->FindString("message") : nullptr;
     std::string error_str = msg ? *msg : "알 수 없는 CDP 에러";
     LOG(ERROR) << "[StorageTool] CDP 에러: " << error_str;
@@ -374,7 +374,7 @@ void StorageTool::OnEvaluateResponse(
     return;
   }
 
-  const base::Value::Dict* result = dict->FindDict("result");
+  const base::DictValue* result = dict->FindDict("result");
   if (!result) {
     LOG(ERROR) << "[StorageTool] 응답에 result 키가 없음";
     std::move(callback).Run(MakeErrorResult("Runtime.evaluate 응답에 result 없음"));
@@ -391,7 +391,7 @@ void StorageTool::OnEvaluateResponse(
   }
 
   // 정상 결과 처리
-  const base::Value::Dict* remote_obj = result->FindDict("result");
+  const base::DictValue* remote_obj = result->FindDict("result");
   if (!remote_obj) {
     // setItem/removeItem/clear는 undefined를 반환하므로 성공으로 처리
     LOG(INFO) << "[StorageTool] 작업 완료 (반환값 없음)";
