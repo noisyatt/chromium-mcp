@@ -1,0 +1,153 @@
+# Copyright 2024 The Chromium Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# MCP(Model Context Protocol) 서버 모듈 빌드 정의.
+# chrome/browser/mcp/ 디렉토리에 위치하며,
+# chrome/browser/BUILD.gn의 deps에 "//chrome/browser/mcp"로 참조됨.
+
+source_set("mcp") {
+  sources = [
+    # ========== 코어 ==========
+    "mcp_server.cc",
+    "mcp_server.h",
+    "mcp_session.cc",
+    "mcp_session.h",
+    "mcp_tool_registry.cc",
+    "mcp_tool_registry.h",
+    "mcp_transport.h",
+    "mcp_transport_stdio.cc",
+    "mcp_transport_stdio.h",
+    "mcp_transport_socket.cc",
+    "mcp_transport_socket.h",
+    "mcp_launcher.cc",
+    "mcp_launcher.h",
+
+    # ========== 페이지 제어 도구 ==========
+    "tools/navigate_tool.cc",
+    "tools/navigate_tool.h",
+    "tools/screenshot_tool.cc",
+    "tools/screenshot_tool.h",
+    "tools/page_content_tool.cc",
+    "tools/page_content_tool.h",
+
+    # ========== DOM/입력 도구 ==========
+    "tools/dom_tool.cc",
+    "tools/dom_tool.h",
+    "tools/javascript_tool.cc",
+    "tools/javascript_tool.h",
+    "tools/keyboard_tool.cc",
+    "tools/keyboard_tool.h",
+    "tools/mouse_tool.cc",
+    "tools/mouse_tool.h",
+    "tools/scroll_tool.cc",
+    "tools/scroll_tool.h",
+    "tools/hover_tool.cc",
+    "tools/hover_tool.h",
+    "tools/drag_tool.cc",
+    "tools/drag_tool.h",
+    "tools/select_option_tool.cc",
+    "tools/select_option_tool.h",
+
+    # ========== 네트워크 도구 ==========
+    "tools/network_tool.cc",
+    "tools/network_tool.h",
+    "tools/network_intercept_tool.cc",
+    "tools/network_intercept_tool.h",
+
+    # ========== 탭/윈도우 도구 ==========
+    "tools/tab_tool.cc",
+    "tools/tab_tool.h",
+    "tools/window_tool.cc",
+    "tools/window_tool.h",
+
+    # ========== 브라우저 정보/유틸 도구 ==========
+    "tools/browser_info_tool.cc",
+    "tools/browser_info_tool.h",
+    "tools/wait_tool.cc",
+    "tools/wait_tool.h",
+    "tools/dialog_tool.cc",
+    "tools/dialog_tool.h",
+    "tools/emulation_tool.cc",
+    "tools/emulation_tool.h",
+
+    # ========== 스토리지/데이터 도구 ==========
+    "tools/cookie_tool.cc",
+    "tools/cookie_tool.h",
+    "tools/storage_tool.cc",
+    "tools/storage_tool.h",
+    "tools/clipboard_tool.cc",
+    "tools/clipboard_tool.h",
+
+    # ========== 요소/검색 도구 ==========
+    "tools/element_tool.cc",
+    "tools/element_tool.h",
+    "tools/element_info_tool.cc",
+    "tools/element_info_tool.h",
+    "tools/find_tool.cc",
+    "tools/find_tool.h",
+
+    # ========== 파일/미디어 도구 ==========
+    "tools/download_tool.cc",
+    "tools/download_tool.h",
+    "tools/file_upload_tool.cc",
+    "tools/file_upload_tool.h",
+    "tools/pdf_tool.cc",
+    "tools/pdf_tool.h",
+
+    # ========== 개발자/디버그 도구 ==========
+    "tools/console_tool.cc",
+    "tools/console_tool.h",
+    "tools/performance_tool.cc",
+    "tools/performance_tool.h",
+    "tools/coverage_tool.cc",
+    "tools/coverage_tool.h",
+
+    # ========== 브라우저 데이터 도구 ==========
+    "tools/history_tool.cc",
+    "tools/history_tool.h",
+    "tools/bookmark_tool.cc",
+    "tools/bookmark_tool.h",
+  ]
+
+  deps = [
+    # Chromium 기본 라이브러리
+    "//base",
+
+    # 브라우저 공개 API (WebContents, DevToolsAgentHost 등)
+    "//content/public/browser",
+
+    # Chrome DevTools Protocol 지원
+    "//content/browser/devtools",
+
+    # CDP JSON 직렬화
+    "//third_party/inspector_protocol:crdtp",
+
+    # 브라우저 UI (탭 스트립, Browser 클래스)
+    "//chrome/browser/ui",
+
+    # 버전 정보
+    "//components/version_info",
+
+    # 네트워크 스택
+    "//net",
+
+    # 클립보드 API (clipboard_tool)
+    "//ui/base",
+
+    # 히스토리 서비스 (history_tool)
+    "//components/history/core/browser",
+    "//chrome/browser/history",
+
+    # 북마크 모델 (bookmark_tool)
+    "//components/bookmarks/browser",
+    "//chrome/browser/bookmarks",
+
+    # 프로파일 (히스토리/북마크 팩토리 접근)
+    "//chrome/browser/profiles",
+  ]
+
+  public_deps = [
+    "//content/public/browser",
+  ]
+}

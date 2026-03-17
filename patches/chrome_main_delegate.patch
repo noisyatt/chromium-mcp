@@ -1,0 +1,101 @@
+# chrome/app/chrome_main_delegate.cc 에 MCP 서버 초기화 코드 추가 패치
+#
+# 적용 방법:
+#   cd <chromium_src>
+#   git apply patches/chrome_main_delegate.patch
+#
+# 패치 대상: chrome/app/chrome_main_delegate.cc
+# 변경 내용:
+#   1. MCP 서버 헤더 인클루드 추가
+#   2. InitializeMcpIfNeeded() 함수 추가
+#   3. ChromeMainDelegate::PostEarlyInitialization() 또는
+#      ChromeBrowserMainParts::PreMainMessageLoopRun() 에서 함수 호출
+
+--- a/chrome/app/chrome_main_delegate.cc
++++ b/chrome/app/chrome_main_delegate.cc
+@@ -1,6 +1,11 @@
+ // Copyright 2012 The Chromium Authors
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
++
++// MCP 서버 헤더 (chromium-mcp 포크 추가)
++#include "chrome/browser/mcp/mcp_server.h"
+
+ #include "chrome/app/chrome_main_delegate.h"
+
+@@ -20,6 +25,9 @@
+ #include "base/command_line.h"
+ #include "base/environment.h"
+ #include "base/files/file_path.h"
++#include "base/logging.h"
++
++// POSIX 환경변수 해제를 위한 헤더 (unsetenv)
++#include <cstdlib>
+
+ // ... (기존 인클루드 생략) ...
+
+@@ -100,6 +108,56 @@ namespace {
+ // ... (기존 익명 네임스페이스 코드) ...
++
++// MCP 서버 초기화 함수.
++// 다음 조건 중 하나라도 충족되면 MCP 서버를 시작합니다:
++//   1. --mcp-stdio 커맨드라인 스위치가 존재하는 경우
++//   2. CHROMIUM_MCP 환경변수가 설정된 경우
++//   3. --mcp-socket=<path> 스위치로 소켓 경로가 지정된 경우
++//
++// MCP 관련 스위치/환경변수는 서버 시작 후 즉시 제거하여
++// 렌더러 프로세스나 자식 프로세스로 전파되지 않도록 합니다.
++void InitializeMcpIfNeeded() {
++  auto* cmd = base::CommandLine::ForCurrentProcess();
++
++  // 활성화 조건 확인
++  bool mcp_stdio = cmd->HasSwitch("mcp-stdio");
++  bool mcp_env = (!!getenv("CHROMIUM_MCP"));
++  std::string socket_path = cmd->GetSwitchValueASCII("mcp-socket");
++  bool mcp_socket = !socket_path.empty();
++
++  // 세 가지 조건 중 하나도 해당하지 않으면 MCP 서버 미실행
++  if (!mcp_stdio && !mcp_env && !mcp_socket) {
++    return;
++  }
++
++  // 커맨드라인 스위치 제거 — 자식 프로세스(렌더러 등)로 전파 방지
++  cmd->RemoveSwitch("mcp-stdio");
++  cmd->RemoveSwitch("mcp-socket");
++
++  // 환경변수 제거 — fork된 자식 프로세스로 전파 방지
++  unsetenv("CHROMIUM_MCP");
++
++  VLOG(1) << "[MCP] MCP 서버 초기화 시작"
++          << " stdio=" << mcp_stdio
++          << " env=" << mcp_env
++          << " socket=" << socket_path;
++
++  auto* server = mcp::McpServer::GetInstance();
++
++  if (mcp_stdio || mcp_env) {
++    // stdio 모드: stdin/stdout을 JSON-RPC 채널로 사용
++    // MCP 클라이언트(예: Claude Desktop)가 프로세스를 직접 실행할 때 사용
++    server->StartWithStdio();
++    VLOG(1) << "[MCP] stdio 모드로 서버 시작";
++  } else {
++    // 소켓 모드: 지정된 Unix 도메인 소켓 경로로 수신 대기
++    // 이미 실행 중인 Chromium 인스턴스에 외부 MCP 클라이언트가 접속할 때 사용
++    server->StartWithSocket(socket_path);
++    VLOG(1) << "[MCP] 소켓 모드로 서버 시작: " << socket_path;
++  }
++}
+
+ }  // namespace
+
+@@ -200,6 +253,10 @@ absl::optional<int> ChromeMainDelegate::PostEarlyInitialization(
+   // ... (기존 초기화 코드) ...
++
++  // MCP 서버 조건부 초기화 (chromium-mcp 포크 추가)
++  // 브라우저 프로세스에서만 실행되도록 프로세스 타입 확인
++  if (process_type.empty()) {
++    InitializeMcpIfNeeded();
++  }
+
+   return absl::nullopt;
+ }

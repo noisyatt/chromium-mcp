@@ -1,0 +1,72 @@
+# chrome/common/chrome_switches.h 및 chrome_switches.cc 에 MCP 스위치 등록 패치
+#
+# 적용 방법:
+#   cd <chromium_src>
+#   git apply patches/mcp_switches.patch
+#
+# 패치 대상:
+#   - chrome/common/chrome_switches.h  : extern 선언 추가
+#   - chrome/common/chrome_switches.cc : 문자열 상수 정의 추가
+#
+# 등록되는 커맨드라인 스위치:
+#   --mcp-stdio   : stdio(stdin/stdout) 모드로 MCP 서버 시작
+#   --mcp-socket= : 지정된 Unix 도메인 소켓 경로로 MCP 서버 시작
+
+--- a/chrome/common/chrome_switches.h
++++ b/chrome/common/chrome_switches.h
+@@ -1,6 +1,9 @@
+ // Copyright 2012 The Chromium Authors
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
++
++// MCP 커맨드라인 스위치 선언 (chromium-mcp 포크 추가)
+
+ #ifndef CHROME_COMMON_CHROME_SWITCHES_H_
+ #define CHROME_COMMON_CHROME_SWITCHES_H_
+@@ -50,6 +53,16 @@ extern const char kDisableExtensions[];
+ // ... (기존 스위치 선언들) ...
++
++// =========================================================
++// MCP(Model Context Protocol) 서버 관련 스위치
++// chromium-mcp 포크에서 추가됨
++// =========================================================
++
++// --mcp-stdio
++// 이 스위치가 있으면 MCP 서버를 stdio(stdin/stdout) 모드로 시작합니다.
++// Claude Desktop 등 MCP 클라이언트가 Chromium 프로세스를 직접 spawn할 때 사용.
++extern const char kMcpStdio[];
++
++// --mcp-socket=<path>
++// 지정된 경로에 Unix 도메인 소켓을 생성하고 MCP 서버를 시작합니다.
++// 이미 실행 중인 Chromium 인스턴스에 외부 클라이언트가 접속할 때 사용.
++extern const char kMcpSocket[];
+
+ }  // namespace switches
+
+--- a/chrome/common/chrome_switches.cc
++++ b/chrome/common/chrome_switches.cc
+@@ -1,6 +1,9 @@
+ // Copyright 2012 The Chromium Authors
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
++
++// MCP 커맨드라인 스위치 정의 (chromium-mcp 포크 추가)
+
+ #include "chrome/common/chrome_switches.h"
+
+@@ -50,6 +53,15 @@ const char kDisableExtensions[] = "disable-extensions";
+ // ... (기존 스위치 정의들) ...
++
++// =========================================================
++// MCP(Model Context Protocol) 서버 관련 스위치 정의
++// chromium-mcp 포크에서 추가됨
++// =========================================================
++
++// stdio 모드 활성화 스위치. 값 없이 플래그로만 사용.
++const char kMcpStdio[] = "mcp-stdio";
++
++// 소켓 모드 활성화 스위치. 값으로 소켓 파일 경로를 받음.
++// 예: --mcp-socket=/tmp/chromium-mcp.sock
++const char kMcpSocket[] = "mcp-socket";
+
+ }  // namespace switches

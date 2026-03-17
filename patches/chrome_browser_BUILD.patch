@@ -1,0 +1,36 @@
+# chrome/browser/BUILD.gn 에 MCP 모듈 의존성 추가 패치
+#
+# 적용 방법:
+#   cd <chromium_src>
+#   git apply patches/chrome_browser_BUILD.patch
+#
+# 패치 대상: chrome/browser/BUILD.gn
+# 변경 내용: deps 목록에 "//chrome/browser/mcp" 추가
+#
+# 참고: 아래 컨텍스트 라인은 실제 Chromium 소스의 chrome/browser/BUILD.gn 내용과
+# 일치해야 합니다. Chromium 버전에 따라 주변 코드가 다를 수 있으므로,
+# install.sh가 자동 적용에 실패할 경우 수동으로 해당 deps 블록에
+# "//chrome/browser/mcp" 한 줄을 추가하세요.
+
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -1,6 +1,11 @@
+ # Chrome browser main target.
+ # This file is auto-generated. Do not edit manually.
+
++# MCP(Model Context Protocol) 서버 통합.
++# chromium-mcp 포크에서 추가된 빌드 의존성.
++
+ static_library("browser") {
+   # ... (기존 소스 파일 목록 생략) ...
+
+@@ -50,6 +55,9 @@ static_library("browser") {
+     # Chrome 브라우저 핵심 컴포넌트
+     "//chrome/browser/ui",
+     "//chrome/browser/profiles:profile",
++
++    # MCP 서버 모듈 (chromium-mcp 포크 추가)
++    "//chrome/browser/mcp",
+
+     # 기타 의존성...
+     "//components/version_info",
