@@ -235,6 +235,50 @@ tools = recv_msg(s)
 | 네트워크 노출 | 포트 오픈 | 없음 | 없음 |
 | 프로세스 인자 | `--remote-debugging-port` 노출 | 없음 | MCP 플래그 자동 제거 |
 
+## 주요 도구 사용 예시
+
+### keyboard 도구
+
+```python
+# 텍스트 입력 (insertText — 한글/이모지 포함 가능)
+send_msg(s, {'jsonrpc':'2.0','id':10,'method':'tools/call','params':{
+    'name':'keyboard','arguments':{'action':'type','text':'안녕하세요 MCP 테스트'}
+}})
+
+# 글자별 타이핑 (delay > 0이면 각 문자마다 keyDown/keyUp 발송)
+send_msg(s, {'jsonrpc':'2.0','id':11,'method':'tools/call','params':{
+    'name':'keyboard','arguments':{'action':'type','text':'hello','delay':50}
+}})
+
+# 특수키 입력
+send_msg(s, {'jsonrpc':'2.0','id':12,'method':'tools/call','params':{
+    'name':'keyboard','arguments':{'action':'press','key':'Enter'}
+}})
+
+# 단축키 (Cmd+A 전체 선택 등)
+send_msg(s, {'jsonrpc':'2.0','id':13,'method':'tools/call','params':{
+    'name':'keyboard','arguments':{'action':'shortcut','key':'a','modifiers':['meta']}
+}})
+```
+
+### Node.js로 직접 소켓 연결
+
+```javascript
+const net = require('net');
+const sock = net.createConnection({path: '/tmp/.chromium-mcp.sock'});
+// Content-Length 프레이밍으로 JSON-RPC 메시지 송수신
+```
+
+## 제약 사항
+
+- **단일 클라이언트:** 소켓 모드는 동시에 1개 클라이언트만 연결 가능. 기존 연결이 있으면 새 연결은 거절된다.
+- **이전 클라이언트 정리:** EPIPE 에러가 발생하면, 이전에 연결했던 클라이언트 프로세스가 아직 살아있는지 확인하고 종료해야 한다.
+  ```bash
+  # 소켓을 점유 중인 프로세스 확인
+  lsof /tmp/.chromium-mcp.sock
+  # 해당 클라이언트 프로세스 종료 후 재연결
+  ```
+
 ## 트러블슈팅
 
 ### 소켓 연결 안 됨
@@ -245,11 +289,20 @@ rm -f /tmp/.chromium-mcp.sock
 rm -f ~/.chromium-mcp/instance.lock
 ```
 
+### EPIPE 에러 (연결 후 즉시 끊김)
+- **원인:** 이전 클라이언트가 소켓을 점유 중 (단일 클라이언트 제한)
+- **해결:** `lsof /tmp/.chromium-mcp.sock`로 점유 프로세스 확인 후 종료
+
 ### MCP 서버가 시작 안 됨
-- `--mcp-socket` 또는 `CHROMIUM_MCP=1` 플래그 확인
+- 플래그 없이 실행해도 기본적으로 MCP 서버가 시작됨
 - `CHROMIUM_MCP=0`이 설정되어 있지 않은지 확인
 
 ### Content-Length 프레이밍 오류
 - 줄바꿈은 반드시 `\r\n` (CRLF) 사용
 - 헤더와 바디 사이에 빈 줄 `\r\n` 필요
 - `\n`만 사용하면 서버가 헤더를 파싱하지 못함
+
+### macOS Cmd+키 단축키가 동작하지 않음
+- CDP `Input.dispatchKeyEvent`에 `commands` 필드가 필요
+- `keyboard_tool.cc`에서 `GetMacCommand()`가 자동으로 매핑함
+- 지원되는 단축키: selectAll(Cmd+A), copy(Cmd+C), paste(Cmd+V), cut(Cmd+X), undo(Cmd+Z), redo(Cmd+Shift+Z)
