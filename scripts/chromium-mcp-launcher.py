@@ -324,11 +324,21 @@ def launch_browser(config: LauncherConfig, socket_path: str) -> subprocess.Popen
     _log(f"브라우저 실행 명령: {' '.join(cmd)}")
 
     try:
+        env = os.environ.copy()
+        # ~/.chromium-mcp/google-api.env 에서 Google API 키 로드
+        _api_env = Path.home() / '.chromium-mcp' / 'google-api.env'
+        if _api_env.is_file():
+            for line in _api_env.read_text().splitlines():
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    k, v = line.split('=', 1)
+                    env.setdefault(k.strip(), v.strip())
         proc = subprocess.Popen(
             cmd,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env=env,
             # 새 세션으로 분리: 프록시가 종료되어도 브라우저는 계속 실행
             start_new_session=True,
         )

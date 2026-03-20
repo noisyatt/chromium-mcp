@@ -33,6 +33,25 @@ RETRY_DELAY      = 2    # 재시도 간격(초)
 GRACE_PERIOD     = 5    # 소켓 끊김 → STOPPED 전이 유예(초)
 COOLDOWN         = 30   # 연속 크래시 후 재시작 대기(초)
 
+# Google API 키 파일 경로 (~/.chromium-mcp/google-api.env)
+GOOGLE_API_ENV = os.path.expanduser('~/.chromium-mcp/google-api.env')
+
+
+def _load_google_api_env() -> dict[str, str]:
+    """~/.chromium-mcp/google-api.env 에서 KEY=VALUE 쌍을 읽어 dict로 반환."""
+    result = {}
+    if not os.path.isfile(GOOGLE_API_ENV):
+        return result
+    with open(GOOGLE_API_ENV) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            if '=' in line:
+                k, v = line.split('=', 1)
+                result[k.strip()] = v.strip()
+    return result
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [daemon] %(levelname)s %(message)s',
@@ -144,10 +163,13 @@ class ChromiumManager:
         for attempt in range(1, MAX_RETRY + 1):
             log.info(f'Chromium 시작 시도 {attempt}/{MAX_RETRY}: {CHROMIUM_PATH}')
             try:
+                env = os.environ.copy()
+                env.update(_load_google_api_env())
                 proc = subprocess.Popen(
                     [CHROMIUM_PATH, '--no-first-run', '--disable-default-apps'],
                     stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
+                    stderr=subprocess.DEVNULL,
+                    env=env
                 )
             except FileNotFoundError:
                 log.error(f'Chromium 바이너리 없음: {CHROMIUM_PATH}')
