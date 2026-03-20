@@ -110,7 +110,7 @@ class ChromiumManager:
         if proc is not None:
             try:
                 proc.terminate()
-                proc.wait(timeout=5)
+                proc.wait(timeout=15)
             except subprocess.TimeoutExpired:
                 proc.kill()
             except Exception as e:
