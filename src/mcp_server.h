@@ -141,6 +141,13 @@ class McpServer {
   // 연결된 세션이 없으면 nullptr 반환.
   McpSession* GetActiveSession();
 
+  // 특정 클라이언트에 배정된 탭의 세션을 반환.
+  // 배정된 탭이 없거나 세션이 없으면 자동 attach 시도.
+  McpSession* GetSessionForClient(int client_id);
+
+  // 특정 클라이언트에 탭을 배정한다.
+  void AssignTabToClient(int client_id, content::WebContents* web_contents);
+
   // -----------------------------------------------------------------------
   // MCP 메시지 처리 (McpTransport 콜백)
   // -----------------------------------------------------------------------
@@ -298,6 +305,8 @@ class McpServer {
     std::string client_name;
     std::string client_version;
     std::string protocol_version;
+    // 이 클라이언트에 배정된 탭. CDP 명령이 이 탭으로 라우팅됨.
+    raw_ptr<content::WebContents> assigned_tab = nullptr;
   };
 
   // client_id → ClientState 매핑
@@ -320,8 +329,7 @@ class McpServer {
   std::unordered_map<content::WebContents*, std::unique_ptr<McpSession>>
       sessions_;
 
-  // 현재 활성 탭 (포커스된 탭)
-  raw_ptr<content::WebContents> active_web_contents_ = nullptr;
+  // [제거됨] active_web_contents_ — client_states_[].assigned_tab으로 대체
 
   // 등록된 MCP 도구 목록 (name → definition) — 레거시 인라인 핸들러용
   std::unordered_map<std::string, McpToolDefinition> tools_;

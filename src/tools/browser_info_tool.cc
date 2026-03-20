@@ -29,6 +29,10 @@ namespace mcp {
 BrowserInfoTool::BrowserInfoTool() = default;
 BrowserInfoTool::~BrowserInfoTool() = default;
 
+bool BrowserInfoTool::requires_session() const {
+  return false;
+}
+
 std::string BrowserInfoTool::name() const {
   return "browser_info";
 }

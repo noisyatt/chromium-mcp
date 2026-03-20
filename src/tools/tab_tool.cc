@@ -32,6 +32,10 @@ namespace mcp {
 TabsTool::TabsTool() = default;
 TabsTool::~TabsTool() = default;
 
+bool TabsTool::requires_session() const {
+  return false;
+}
+
 std::string TabsTool::name() const {
   return "tabs";
 }

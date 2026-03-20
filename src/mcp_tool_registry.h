@@ -32,9 +32,14 @@ class McpTool {
   // JSON Schema 형식의 입력 파라미터 스키마
   virtual base::DictValue input_schema() const = 0;
 
+  // CDP 세션이 필요한 도구인지 여부.
+  // false를 반환하는 도구는 session==nullptr이어도 Execute() 호출이 허용된다.
+  // 기본값 true. tabs, clipboard, browser_info 등 CDP 불필요 도구가 오버라이드.
+  virtual bool requires_session() const;
+
   // 도구 실행.
   // arguments: tools/call 요청의 arguments 필드
-  // session: 현재 MCP 세션 (탭/브라우저 컨텍스트 접근용)
+  // session: 현재 MCP 세션 (탭/브라우저 컨텍스트 접근용, nullable if !requires_session)
   // callback: 실행 완료 시 결과(base::Value)를 전달하는 콜백
   virtual void Execute(const base::DictValue& arguments,
                        McpSession* session,

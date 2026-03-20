@@ -48,6 +48,10 @@ base::Value MakeErrorResult(const std::string& text) {
 ClipboardTool::ClipboardTool() = default;
 ClipboardTool::~ClipboardTool() = default;
 
+bool ClipboardTool::requires_session() const {
+  return false;
+}
+
 std::string ClipboardTool::name() const {
   return "clipboard";
 }

@@ -37,6 +37,7 @@ class BrowserInfoTool : public McpTool {
   std::string name() const override;
   std::string description() const override;
   base::DictValue input_schema() const override;
+  bool requires_session() const override;
   void Execute(const base::DictValue& arguments,
                McpSession* session,
                base::OnceCallback<void(base::Value)> callback) override;

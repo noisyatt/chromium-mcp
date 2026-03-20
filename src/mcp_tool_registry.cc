@@ -9,6 +9,10 @@
 
 namespace mcp {
 
+bool McpTool::requires_session() const {
+  return true;
+}
+
 McpToolRegistry::McpToolRegistry() = default;
 McpToolRegistry::~McpToolRegistry() = default;
 
@@ -93,10 +97,10 @@ void McpToolRegistry::DispatchToolCall(
     return;
   }
 
-  // 세션이 없으면 에러 응답 (null dereference 방지)
-  if (!session) {
+  // 세션이 없고 도구가 CDP 세션을 필요로 하면 에러 응답
+  if (!session && tool->requires_session()) {
     LOG(WARNING) << "[MCP] DispatchToolCall: 세션 없음. '" << tool_name
-                 << "' 도구 실행 불가";
+                 << "' 도구는 CDP 세션이 필요합니다";
     base::DictValue error_content;
     error_content.Set("type", "text");
     error_content.Set("text",

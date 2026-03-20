@@ -194,7 +194,6 @@ void McpServer::Shutdown() {
 
   // 모든 세션 종료 (DevToolsAgentHost 연결 해제)
   sessions_.clear();
-  active_web_contents_ = nullptr;
 
   // 전송 계층 종료
   if (transport_) {
@@ -263,7 +262,6 @@ McpSession* McpServer::AttachToWebContents(
 
   McpSession* session_ptr = session.get();
   sessions_[web_contents] = std::move(session);
-  active_web_contents_ = web_contents;
 
   LOG(INFO) << "[MCP] WebContents에 세션 연결 완료";
   return session_ptr;
@@ -280,8 +278,13 @@ void McpServer::DetachFromWebContents(content::WebContents* web_contents) {
   // 세션 정리 (소멸자에서 DevToolsAgentHost 연결 해제)
   sessions_.erase(it);
 
-  if (active_web_contents_ == web_contents) {
-    active_web_contents_ = nullptr;
+  // 이 탭을 assigned_tab으로 가진 모든 클라이언트의 배정 해제
+  for (auto& [id, state] : client_states_) {
+    if (state.assigned_tab == web_contents) {
+      state.assigned_tab = nullptr;
+      LOG(INFO) << "[MCP] 탭 닫힘으로 client_id=" << id
+                << "의 assigned_tab 해제";
+    }
   }
 
   LOG(INFO) << "[MCP] WebContents에서 세션 분리 완료";
@@ -290,16 +293,66 @@ void McpServer::DetachFromWebContents(content::WebContents* web_contents) {
 McpSession* McpServer::GetActiveSession() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  if (!active_web_contents_) {
+  // 레거시 호환: 인라인 도구에서 사용. 첫 번째 연결된 클라이언트의 탭 반환.
+  for (const auto& [id, state] : client_states_) {
+    if (state.assigned_tab) {
+      auto it = sessions_.find(state.assigned_tab);
+      if (it != sessions_.end()) {
+        return it->second.get();
+      }
+    }
+  }
+  return nullptr;
+}
+
+McpSession* McpServer::GetSessionForClient(int client_id) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  auto state_it = client_states_.find(client_id);
+  if (state_it == client_states_.end()) {
     return nullptr;
   }
 
-  auto it = sessions_.find(active_web_contents_);
-  if (it == sessions_.end()) {
-    return nullptr;
+  content::WebContents* wc = state_it->second.assigned_tab;
+  if (!wc) {
+    // 배정된 탭이 없으면 현재 활성 탭에 자동 배정
+    Browser* browser = chrome::FindLastActive();
+    if (!browser || !browser->tab_strip_model()) {
+      return nullptr;
+    }
+    wc = browser->tab_strip_model()->GetActiveWebContents();
+    if (!wc) {
+      return nullptr;
+    }
+    state_it->second.assigned_tab = wc;
+    LOG(INFO) << "[MCP] client_id=" << client_id
+              << "에 활성 탭 자동 배정: " << wc->GetVisibleURL().spec();
   }
 
-  return it->second.get();
+  auto session_it = sessions_.find(wc);
+  if (session_it == sessions_.end()) {
+    // 세션이 없으면 자동 attach
+    return AttachToWebContents(wc);
+  }
+  return session_it->second.get();
+}
+
+void McpServer::AssignTabToClient(int client_id,
+                                   content::WebContents* web_contents) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  auto it = client_states_.find(client_id);
+  if (it == client_states_.end()) {
+    return;
+  }
+
+  it->second.assigned_tab = web_contents;
+  LOG(INFO) << "[MCP] client_id=" << client_id << "에 탭 배정";
+
+  // 새 탭에 세션이 없으면 자동 attach
+  if (web_contents && sessions_.find(web_contents) == sessions_.end()) {
+    AttachToWebContents(web_contents);
+  }
 }
 
 // -----------------------------------------------------------------------
@@ -445,18 +498,21 @@ void McpServer::HandleInitialized(int client_id) {
   LOG(INFO) << "[MCP] 핸드셰이크 완료 (client_id=" << client_id
             << "). 도구 호출 대기 중.";
 
-  // 활성 탭이 있으면 자동으로 세션 연결
+  // 활성 탭이 있으면 이 클라이언트에 자동 배정
   if (config_ && config_->auto_attach_active_tab) {
-    if (!active_web_contents_) {
-      // BrowserList에서 활성 탭 탐색
-      Browser* browser = chrome::FindLastActive();
-      if (browser && browser->tab_strip_model()) {
-        active_web_contents_ =
-            browser->tab_strip_model()->GetActiveWebContents();
+    Browser* browser = chrome::FindLastActive();
+    if (browser && browser->tab_strip_model()) {
+      content::WebContents* wc =
+          browser->tab_strip_model()->GetActiveWebContents();
+      if (wc) {
+        it->second.assigned_tab = wc;
+        // 세션이 없으면 자동 attach
+        if (sessions_.find(wc) == sessions_.end()) {
+          AttachToWebContents(wc);
+        }
+        LOG(INFO) << "[MCP] client_id=" << client_id
+                  << "에 활성 탭 배정: " << wc->GetVisibleURL().spec();
       }
-    }
-    if (active_web_contents_) {
-      AttachToWebContents(active_web_contents_);
     }
   }
 }
@@ -538,17 +594,27 @@ void McpServer::HandleToolsCall(int client_id, const base::Value* id,
 
   LOG(INFO) << "[MCP] 도구 실행: " << *tool_name;
 
-  // 세션이 없으면 활성 브라우저 탭에 자동 연결 시도
-  if (!GetActiveSession()) {
-    LOG(INFO) << "[MCP] 활성 세션 없음. 자동 attach 시도...";
+  // 클라이언트에 배정된 세션 확인, 없으면 자동 배정 시도
+  McpSession* client_session = GetSessionForClient(client_id);
+  if (!client_session) {
+    LOG(INFO) << "[MCP] client_id=" << client_id
+              << " 세션 없음. 자동 배정 시도...";
     Browser* browser = chrome::FindLastActive();
+    if (!browser) {
+      Profile* profile = ProfileManager::GetLastUsedProfileIfLoaded();
+      if (profile) {
+        chrome::NewEmptyWindow(profile);
+        browser = chrome::FindLastActive();
+      }
+    }
     if (browser && browser->tab_strip_model()) {
       content::WebContents* wc =
           browser->tab_strip_model()->GetActiveWebContents();
       if (wc) {
-        AttachToWebContents(wc);
-        LOG(INFO) << "[MCP] 자동 attach 성공: "
-                  << wc->GetVisibleURL().spec();
+        AssignTabToClient(client_id, wc);
+        client_session = GetSessionForClient(client_id);
+        LOG(INFO) << "[MCP] client_id=" << client_id
+                  << " 자동 배정 성공: " << wc->GetVisibleURL().spec();
       }
     }
   }
@@ -582,12 +648,8 @@ void McpServer::HandleToolsCall(int client_id, const base::Value* id,
 
   // 2. McpToolRegistry 기반 도구에서 검색
   if (tool_registry_) {
-    McpSession* session = GetActiveSession();
-    if (!session) {
-      LOG(WARNING) << "[MCP] 세션 없이 registry 도구 호출: " << *tool_name;
-    }
     tool_registry_->DispatchToolCall(
-        *tool_name, tool_args, session, std::move(result_callback));
+        *tool_name, tool_args, client_session, std::move(result_callback));
     return;
   }
 
@@ -1665,9 +1727,6 @@ void McpServer::ExecuteBrowserInfo(
     if (wc) {
       info.Set("activeTabUrl", wc->GetVisibleURL().spec());
       info.Set("activeTabTitle", base::UTF16ToUTF8(wc->GetTitle()));
-      if (!active_web_contents_) {
-        active_web_contents_ = wc;
-      }
     }
   }
 

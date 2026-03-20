@@ -36,6 +36,7 @@ class ClipboardTool : public McpTool {
   std::string name() const override;
   std::string description() const override;
   base::DictValue input_schema() const override;
+  bool requires_session() const override;
 
   // Execute는 read 액션의 경우 ReadText() callback을 통해 비동기적으로 완료된다.
   // write 액션은 동기적으로 즉시 완료된다.
