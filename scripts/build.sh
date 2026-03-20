@@ -230,6 +230,23 @@ case "$(uname -s)" in
     ;;
 esac
 
+# ─── macOS 코드 서명 ─────────────────────────────────────────────────────────
+if [[ "$(uname -s)" == "Darwin" ]] && [[ -d "${CHROME_APP}" ]]; then
+  CODESIGN_IDENTITY="${CHROMIUM_CODESIGN_IDENTITY:-Chromium Dev}"
+  if security find-identity -v -p codesigning | grep -q "${CODESIGN_IDENTITY}"; then
+    info "코드 서명 중... (${CODESIGN_IDENTITY})"
+    if codesign --force --deep -s "${CODESIGN_IDENTITY}" "${CHROME_APP}" 2>&1; then
+      success "코드 서명 완료"
+    else
+      warn "코드 서명 실패 — 키체인 접근을 확인하세요."
+    fi
+  else
+    warn "코드 서명 인증서 '${CODESIGN_IDENTITY}'를 찾을 수 없습니다."
+    warn "키체인 접근 앱에서 자체 서명 인증서를 생성하세요."
+    warn "또는 환경변수로 지정: CHROMIUM_CODESIGN_IDENTITY=\"인증서 이름\""
+  fi
+fi
+
 echo ""
 info "MCP 서버 테스트:"
 info "  stdio 모드: ${CHROME_BIN:-${BUILD_DIR}/chrome} --mcp-stdio --headless"
