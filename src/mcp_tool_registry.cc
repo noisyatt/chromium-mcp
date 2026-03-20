@@ -93,6 +93,23 @@ void McpToolRegistry::DispatchToolCall(
     return;
   }
 
+  // 세션이 없으면 에러 응답 (null dereference 방지)
+  if (!session) {
+    LOG(WARNING) << "[MCP] DispatchToolCall: 세션 없음. '" << tool_name
+                 << "' 도구 실행 불가";
+    base::DictValue error_content;
+    error_content.Set("type", "text");
+    error_content.Set("text",
+                      "활성 브라우저 탭이 없습니다. 탭을 열고 다시 시도하세요.");
+    base::ListValue content_list;
+    content_list.Append(std::move(error_content));
+    base::DictValue error_result;
+    error_result.Set("isError", true);
+    error_result.Set("content", std::move(content_list));
+    std::move(callback).Run(base::Value(std::move(error_result)));
+    return;
+  }
+
   LOG(INFO) << "[MCP] DispatchToolCall: '" << tool_name << "' 도구 실행";
   tool->Execute(arguments, session, std::move(callback));
 }

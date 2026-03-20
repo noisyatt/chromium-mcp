@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_MCP_MCP_TRANSPORT_SOCKET_H_
 #define CHROME_BROWSER_MCP_MCP_TRANSPORT_SOCKET_H_
 
+#include <map>
 #include <memory>
 #include <string>
 
@@ -29,9 +30,10 @@ namespace mcp {
 //
 // 동작 방식:
 //   - UI 스레드에서 base::FileDescriptorWatcher로 accept() 이벤트 감시
-//   - 클라이언트 연결 수락 후 전용 스레드에서 블로킹 read()
+//   - 클라이언트 연결 수락 후 각 클라이언트 전용 스레드에서 블로킹 read()
 //   - Content-Length 프레이밍으로 메시지 경계 처리
-//   - 현재 구현은 단일 클라이언트 연결만 지원 (추가 연결은 거절)
+//   - 멀티 클라이언트 지원: 각 클라이언트마다 별도 IO 스레드로 관리
+//   - Send()는 모든 연결된 클라이언트에 브로드캐스트
 class McpTransportSocket : public McpTransport {
  public:
   // socket_path: Unix 소켓 파일 경로.
@@ -44,13 +46,27 @@ class McpTransportSocket : public McpTransport {
   void Start(MessageCallback message_cb,
              DisconnectCallback disconnect_cb) override;
   void Stop() override;
-  void Send(const std::string& json_message) override;
+  void Send(int client_id, const std::string& json_message) override;
   bool IsConnected() const override;
 
   // 현재 소켓 파일 경로를 반환한다.
   const std::string& socket_path() const { return socket_path_; }
 
  private:
+  // 개별 클라이언트 연결 정보를 담는 구조체.
+  // 각 클라이언트는 고유 ID, 소켓 fd, 전용 IO 스레드를 가진다.
+  struct ClientInfo {
+    ClientInfo();
+    ~ClientInfo();
+
+    // 클라이언트 고유 식별자
+    int id = 0;
+    // 클라이언트 소켓 fd
+    base::ScopedFD fd;
+    // 클라이언트 전용 IO 스레드 (블로킹 read 실행용)
+    std::unique_ptr<base::Thread> io_thread;
+  };
+
   // Unix domain socket을 생성하고 바인딩한다.
   // 성공 시 true, 실패 시 false 반환.
   bool CreateAndBindSocket();
@@ -63,9 +79,11 @@ class McpTransportSocket : public McpTransport {
   // UI 스레드에서 호출된다.
   void OnAcceptReady();
 
-  // 클라이언트 소켓에서 메시지를 읽는 루프.
-  // io_thread_ 에서 실행된다.
-  void ReadLoop();
+  // 특정 클라이언트의 소켓에서 메시지를 읽는 루프.
+  // 해당 클라이언트의 io_thread에서 실행된다.
+  // client_id: 읽기 대상 클라이언트 ID
+  // fd: 읽기 대상 소켓 fd (raw, ClientInfo에서 소유)
+  void ReadLoop(int client_id, int fd);
 
   // Content-Length 헤더 파싱.
   bool ParseContentLengthHeader(const std::string& header_line,
@@ -77,11 +95,13 @@ class McpTransportSocket : public McpTransport {
   // fd에서 줄 하나를 읽어 out에 저장한다 (\r\n 처리 포함).
   bool ReadLine(int fd, std::string* out) const;
 
-  // UI 스레드로 메시지를 포스팅한다.
-  void PostMessageToUIThread(std::string message);
+  // UI 스레드로 메시지를 포스팅한다 (client_id 태깅).
+  void PostMessageToUIThread(int client_id, std::string message);
 
-  // 클라이언트 연결 종료를 처리한다.
-  void HandleClientDisconnect();
+  // 특정 클라이언트 연결 종료를 처리한다 (UI 스레드에서 실행).
+  // client_id에 해당하는 클라이언트를 clients_ 맵에서 제거한다.
+  void HandleClientDisconnect(int client_id);
+
 
   // 소켓 파일 경로 (예: /tmp/.chromium-mcp.sock)
   const std::string socket_path_;
@@ -89,14 +109,8 @@ class McpTransportSocket : public McpTransport {
   // 리스닝 소켓 fd
   base::ScopedFD listen_fd_;
 
-  // 현재 연결된 클라이언트 소켓 fd
-  base::ScopedFD client_fd_;
-
   // listen_fd_ 읽기 이벤트 감시기
   std::unique_ptr<base::FileDescriptorWatcher::Controller> accept_watcher_;
-
-  // 클라이언트 소켓 읽기 전용 스레드
-  base::Thread io_thread_;
 
   // Start() 호출 스레드(UI 스레드) 태스크 러너
   scoped_refptr<base::SequencedTaskRunner> ui_task_runner_;
@@ -107,14 +121,20 @@ class McpTransportSocket : public McpTransport {
   // 연결 종료 콜백
   DisconnectCallback disconnect_cb_;
 
-  // stdout 쓰기 직렬화 락
-  base::Lock write_lock_;
-
-  // 클라이언트 연결 상태
-  bool client_connected_ = false;
+  // 소켓 쓰기 직렬화 락 (Send 브로드캐스트 시 clients_ 순회 보호)
+  // IsConnected()는 const 메서드이므로 mutable 선언 필요
+  mutable base::Lock write_lock_;
 
   // 전송 계층 활성 상태
   bool running_ = false;
+
+  // 다음 클라이언트에 부여할 고유 ID (단조 증가)
+  int next_client_id_ = 0;
+
+  // 연결된 클라이언트 맵: client_id -> ClientInfo
+  // UI 스레드에서만 접근한다 (accept/disconnect 모두 UI 스레드).
+  // Send()에서의 fd 접근은 write_lock_으로 보호한다.
+  std::map<int, std::unique_ptr<ClientInfo>> clients_;
 
   // 약한 포인터 팩토리 (비동기 콜백 수명 관리)
   base::WeakPtrFactory<McpTransportSocket> weak_factory_{this};

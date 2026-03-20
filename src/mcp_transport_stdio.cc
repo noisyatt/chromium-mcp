@@ -79,7 +79,8 @@ void McpTransportStdio::Stop() {
   LOG(INFO) << "[MCP] stdio 전송 계층 중지됨";
 }
 
-void McpTransportStdio::Send(const std::string& json_message) {
+void McpTransportStdio::Send(int /*client_id*/,
+                              const std::string& json_message) {
   if (!running_.load()) {
     LOG(WARNING) << "[MCP] Send(): 전송 계층이 이미 중지됨";
     return;
@@ -143,7 +144,7 @@ void McpTransportStdio::ReadLoop() {
             FROM_HERE,
             base::BindOnce(
                 [](DisconnectCallback cb) {
-                  if (cb) std::move(cb).Run();
+                  if (cb) std::move(cb).Run(/*client_id=*/0);
                 },
                 disconnect_cb_));
         return;
@@ -189,7 +190,7 @@ void McpTransportStdio::ReadLoop() {
           FROM_HERE,
           base::BindOnce(
               [](DisconnectCallback cb) {
-                if (cb) std::move(cb).Run();
+                if (cb) std::move(cb).Run(/*client_id=*/0);
               },
               disconnect_cb_));
       return;
@@ -283,11 +284,12 @@ bool McpTransportStdio::ReadLine(std::string* out) const {
 
 void McpTransportStdio::PostMessageToUIThread(std::string message) {
   // io_thread_에서 호출되어 UI 스레드로 메시지를 전달한다.
+  // stdio는 단일 클라이언트이므로 항상 client_id=0.
   ui_task_runner_->PostTask(
       FROM_HERE,
       base::BindOnce(
           [](MessageCallback cb, std::string msg) {
-            if (cb) cb.Run(msg);
+            if (cb) cb.Run(/*client_id=*/0, msg);
           },
           message_cb_, std::move(message)));
 }

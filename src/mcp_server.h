@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_MCP_MCP_SERVER_H_
 #define CHROME_BROWSER_MCP_MCP_SERVER_H_
 
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -94,6 +95,16 @@ class McpServer {
   // 편의 메서드: Unix 소켓 모드로 서버 시작
   void StartWithSocket(const std::string& socket_path);
 
+  // 2단계 초기화: config만 저장 (PostEarlyInitialization에서 호출)
+  void PrepareConfig(std::unique_ptr<Config> config);
+
+  // 2단계 초기화: transport 시작 (PostBrowserStart에서 호출)
+  // PrepareConfig()로 설정이 저장된 경우에만 동작.
+  void StartIfConfigured();
+
+  // config가 준비되었는지 확인
+  bool HasPendingConfig() const { return pending_config_ != nullptr; }
+
   // -----------------------------------------------------------------------
   // 초기화 / 종료
   // -----------------------------------------------------------------------
@@ -110,6 +121,9 @@ class McpServer {
 
   // 서버 종료. 모든 세션 닫고, transport 종료.
   void Shutdown();
+
+  // 클라이언트 연결 해제 시 해당 클라이언트의 핸드셰이크만 리셋 (서버는 유지)
+  void OnClientDisconnected(int client_id);
 
   // -----------------------------------------------------------------------
   // 탭(WebContents) 연결 관리
@@ -132,8 +146,9 @@ class McpServer {
   // -----------------------------------------------------------------------
 
   // transport로부터 raw JSON 문자열 수신 시 호출.
+  // client_id: 메시지를 보낸 클라이언트 식별자.
   // JSON 파싱 후 HandleMessage()로 라우팅.
-  void OnMessageReceived(const std::string& json_message);
+  void OnMessageReceived(int client_id, const std::string& json_message);
 
   // -----------------------------------------------------------------------
   // 도구 등록
@@ -148,28 +163,28 @@ class McpServer {
   // -----------------------------------------------------------------------
 
   // 파싱된 JSON-RPC 메시지를 method에 따라 적절한 핸들러로 라우팅.
-  void HandleMessage(base::DictValue message);
+  void HandleMessage(int client_id, base::DictValue message);
 
   // MCP initialize 핸드셰이크 처리.
   // 클라이언트 정보를 저장하고 serverInfo + capabilities 응답 반환.
-  void HandleInitialize(const base::Value* id,
+  void HandleInitialize(int client_id, const base::Value* id,
                         const base::DictValue* params);
 
   // notifications/initialized 수신 처리.
   // 이후 도구 호출을 받을 준비 완료 상태로 전환.
-  void HandleInitialized();
+  void HandleInitialized(int client_id);
 
   // tools/list 요청 처리.
   // 등록된 모든 도구의 명세를 배열로 응답.
-  void HandleToolsList(const base::Value* id);
+  void HandleToolsList(int client_id, const base::Value* id);
 
   // tools/call 요청 처리.
   // 요청된 도구 이름으로 핸들러를 찾아 실행.
-  void HandleToolsCall(const base::Value* id,
+  void HandleToolsCall(int client_id, const base::Value* id,
                        const base::DictValue* params);
 
   // 알 수 없는 method 수신 시 처리. 오류 응답 전송.
-  void HandleUnknownMethod(const base::Value* id,
+  void HandleUnknownMethod(int client_id, const base::Value* id,
                            const std::string& method);
 
   // -----------------------------------------------------------------------
@@ -177,15 +192,15 @@ class McpServer {
   // -----------------------------------------------------------------------
 
   // 성공 응답 전송: {"jsonrpc":"2.0","id":...,"result":...}
-  void SendResult(const base::Value* id, base::Value result);
+  void SendResult(int client_id, const base::Value* id, base::Value result);
 
   // 오류 응답 전송: {"jsonrpc":"2.0","id":...,"error":{"code":...,"message":...}}
-  void SendError(const base::Value* id,
+  void SendError(int client_id, const base::Value* id,
                  int code,
                  const std::string& message);
 
-  // base::Value 딕셔너리를 JSON 직렬화하여 transport로 전송.
-  void SendMessage(base::DictValue message);
+  // base::Value 딕셔너리를 JSON 직렬화하여 특정 클라이언트에게 전송.
+  void SendMessage(int client_id, base::DictValue message);
 
   // -----------------------------------------------------------------------
   // 도구 핸들러 등록 (초기화 시 자동 등록)
@@ -275,10 +290,24 @@ class McpServer {
     kReady,         // 핸드셰이크 완료, 도구 호출 수신 가능
   };
 
-  HandshakeState handshake_state_ = HandshakeState::kNotStarted;
+  // 클라이언트별 연결 상태 정보
+  struct ClientState {
+    ClientState();
+    ~ClientState();
+    HandshakeState handshake_state = HandshakeState::kNotStarted;
+    std::string client_name;
+    std::string client_version;
+    std::string protocol_version;
+  };
+
+  // client_id → ClientState 매핑
+  std::map<int, ClientState> client_states_;
 
   // 초기화 설정
   std::unique_ptr<Config> config_;
+
+  // 2단계 초기화용: PrepareConfig()에서 저장, StartIfConfigured()에서 소비
+  std::unique_ptr<Config> pending_config_;
 
   // BrowserContext: DevToolsAgentHost 생성에 필요
   raw_ptr<content::BrowserContext> browser_context_ = nullptr;
@@ -299,11 +328,6 @@ class McpServer {
 
   // McpTool 인터페이스 기반 도구 레지스트리 — 도구 클래스 기반 등록용
   std::unique_ptr<McpToolRegistry> tool_registry_;
-
-  // MCP 클라이언트 정보 (initialize에서 수신)
-  std::string client_name_;
-  std::string client_version_;
-  std::string protocol_version_;
 
   // UI 스레드 시퀀스 검사 (BrowserThread::UI 전용)
   SEQUENCE_CHECKER(sequence_checker_);

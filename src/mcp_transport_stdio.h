@@ -36,7 +36,7 @@ class McpTransportStdio : public McpTransport {
   void Start(MessageCallback message_cb,
              DisconnectCallback disconnect_cb) override;
   void Stop() override;
-  void Send(const std::string& json_message) override;
+  void Send(int client_id, const std::string& json_message) override;
   bool IsConnected() const override;
 
  private:

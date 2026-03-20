@@ -4,12 +4,14 @@
 
 #include "chrome/browser/mcp/mcp_transport_socket.h"
 
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 
 #include <string>
+#include <vector>
 
 #include "base/containers/span.h"
 #include "base/files/file_util.h"
@@ -34,9 +36,11 @@ constexpr int kListenBacklog = 5;
 
 }  // namespace
 
+McpTransportSocket::ClientInfo::ClientInfo() = default;
+McpTransportSocket::ClientInfo::~ClientInfo() = default;
+
 McpTransportSocket::McpTransportSocket(const std::string& socket_path)
-    : socket_path_(socket_path),
-      io_thread_("MCP-socket-reader") {}
+    : socket_path_(socket_path) {}
 
 McpTransportSocket::~McpTransportSocket() {
   Stop();
@@ -70,7 +74,8 @@ void McpTransportSocket::Start(MessageCallback message_cb,
                           weak_factory_.GetWeakPtr()));
 
   running_ = true;
-  LOG(INFO) << "[MCP] Unix socket 전송 계층 시작됨: " << socket_path_;
+  LOG(INFO) << "[MCP] Unix socket 전송 계층 시작됨 (멀티 클라이언트): "
+            << socket_path_;
 }
 
 void McpTransportSocket::Stop() {
@@ -79,13 +84,31 @@ void McpTransportSocket::Stop() {
   }
 
   running_ = false;
-  client_connected_ = false;
 
   // FileDescriptorWatcher 해제
   accept_watcher_.reset();
 
-  // 클라이언트 소켓 닫기
-  client_fd_.reset();
+  // 모든 클라이언트 소켓을 닫아 블로킹 read()를 깨운다.
+  // 1) 먼저 클라이언트 맵을 스왑으로 추출 (락 최소화)
+  // 2) 각 ClientInfo의 fd를 닫아 ReadLoop가 에러로 종료되게 한다.
+  // 3) IO 스레드 Stop()을 호출하여 스레드 완전 종료를 대기한다.
+  //    (Thread::Stop()은 락을 잡은 채로 호출하면 데드락 위험이 있으므로
+  //     락 외부에서 호출한다.)
+  std::map<int, std::unique_ptr<ClientInfo>> clients_to_stop;
+  {
+    base::AutoLock lock(write_lock_);
+    clients_to_stop.swap(clients_);
+  }
+
+  // fd 닫기 → ReadLoop 종료 → Thread::Stop() 순서로 정리
+  for (auto& [id, info] : clients_to_stop) {
+    // fd를 먼저 닫아 블로킹 read()를 깨운다.
+    info->fd.reset();
+    // IO 스레드 종료 대기 (ReadLoop가 이미 return하여 안전)
+    if (info->io_thread && info->io_thread->IsRunning()) {
+      info->io_thread->Stop();
+    }
+  }
 
   // 리스닝 소켓 닫기
   listen_fd_.reset();
@@ -95,18 +118,11 @@ void McpTransportSocket::Stop() {
     unlink(socket_path_.c_str());
   }
 
-  // IO 스레드 중지
-  io_thread_.Stop();
-
   LOG(INFO) << "[MCP] Unix socket 전송 계층 중지됨";
 }
 
-void McpTransportSocket::Send(const std::string& json_message) {
-  if (!client_connected_) {
-    LOG(WARNING) << "[MCP] Send(): 클라이언트가 연결되지 않음";
-    return;
-  }
-
+void McpTransportSocket::Send(int target_client_id,
+                               const std::string& json_message) {
   // Content-Length 기반 메시지 프레이밍
   // 형식: "Content-Length: N\r\n\r\n{json}"
   std::string framed =
@@ -115,30 +131,93 @@ void McpTransportSocket::Send(const std::string& json_message) {
       kCRLF + kCRLF +
       json_message;
 
-  // 동시 쓰기 직렬화
-  base::AutoLock guard(write_lock_);
+  // 쓰기 실패한 클라이언트의 ClientInfo는 락 해제 후 소멸시켜야 한다.
+  // (Thread::Stop()이 데드락 없이 실행되려면 락 외부여야 함)
+  std::vector<std::unique_ptr<ClientInfo>> clients_to_remove;
 
-  int fd = client_fd_.get();
-  if (fd < 0) {
-    LOG(WARNING) << "[MCP] Send(): 유효하지 않은 클라이언트 fd";
-    return;
-  }
+  {
+    base::AutoLock lock(write_lock_);
 
-  // 부분 쓰기 처리를 위해 반복 쓰기
-  base::span<const char> remaining(framed);
-  while (!remaining.empty()) {
-    ssize_t result =
-        HANDLE_EINTR(write(fd, remaining.data(), remaining.size()));
-    if (result < 0) {
-      LOG(ERROR) << "[MCP] 소켓 쓰기 실패: errno=" << errno;
+    if (clients_.empty()) {
+      LOG(WARNING) << "[MCP] Send(): 연결된 클라이언트 없음";
       return;
     }
-    remaining = remaining.subspan(static_cast<size_t>(result));
-  }
+
+    // 쓰기 실패한 클라이언트 ID를 수집하여 나중에 제거한다.
+    std::vector<int> failed_ids;
+
+    // 특정 클라이언트 또는 전체 브로드캐스트 대상 결정
+    for (auto& [cid, info] : clients_) {
+      // target_client_id >= 0이면 해당 클라이언트만, -1이면 전체
+      if (target_client_id >= 0 && cid != target_client_id) {
+        continue;
+      }
+
+      int fd = info->fd.get();
+      if (fd < 0) {
+        LOG(WARNING) << "[MCP] Send(): 유효하지 않은 fd (client_id="
+                     << cid << ")";
+        failed_ids.push_back(cid);
+        continue;
+      }
+
+      // macOS: SO_NOSIGPIPE로 write 시 SIGPIPE 방지
+#if defined(__APPLE__)
+      int nosigpipe = 1;
+      setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe, sizeof(nosigpipe));
+#endif
+
+      // 소켓을 일시적으로 non-blocking으로 전환하여 UI 스레드 블로킹 방지.
+      int flags = fcntl(fd, F_GETFL, 0);
+      bool was_blocking = (flags != -1) && !(flags & O_NONBLOCK);
+      if (was_blocking) {
+        fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+      }
+
+      base::span<const char> remaining(framed);
+      bool write_ok = true;
+      while (!remaining.empty()) {
+        ssize_t result =
+            HANDLE_EINTR(write(fd, remaining.data(), remaining.size()));
+        if (result < 0) {
+          if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            continue;
+          }
+          LOG(ERROR) << "[MCP] 소켓 쓰기 실패 (client_id=" << cid
+                     << "): errno=" << errno;
+          write_ok = false;
+          break;
+        }
+        remaining = remaining.subspan(static_cast<size_t>(result));
+      }
+
+      // blocking 모드로 복구 (IO 스레드의 ReadLoop를 위해)
+      if (was_blocking) {
+        fcntl(fd, F_SETFL, flags);
+      }
+
+      if (!write_ok) {
+        failed_ids.push_back(cid);
+      }
+    }
+
+    // 쓰기 실패한 클라이언트를 맵에서 꺼낸다 (소유권 이전).
+    for (int id : failed_ids) {
+      auto it = clients_.find(id);
+      if (it != clients_.end()) {
+        clients_to_remove.push_back(std::move(it->second));
+        clients_.erase(it);
+      }
+    }
+  }  // write_lock_ 해제
+
+  // 락 해제 후 ClientInfo 소멸 (Thread::Stop() 포함).
 }
 
 bool McpTransportSocket::IsConnected() const {
-  return client_connected_;
+  // 하나 이상의 클라이언트가 연결되어 있으면 true
+  base::AutoLock lock(write_lock_);
+  return !clients_.empty();
 }
 
 bool McpTransportSocket::CreateAndBindSocket() {
@@ -199,21 +278,6 @@ bool McpTransportSocket::SetSocketPermissions() {
 void McpTransportSocket::OnAcceptReady() {
   // UI 스레드에서 호출된다. (FileDescriptorWatcher 콜백)
 
-  // 이미 클라이언트가 연결되어 있으면 새 연결을 거절한다.
-  // 현재 구현은 단일 클라이언트만 지원한다.
-  if (client_connected_) {
-    struct sockaddr_un addr;
-    socklen_t addr_len = sizeof(addr);
-    int new_fd = HANDLE_EINTR(
-        accept(listen_fd_.get(),
-               reinterpret_cast<struct sockaddr*>(&addr), &addr_len));
-    if (new_fd >= 0) {
-      LOG(WARNING) << "[MCP] 이미 클라이언트 연결 중 - 새 연결 거절";
-      close(new_fd);
-    }
-    return;
-  }
-
   // 새 클라이언트 연결 수락
   struct sockaddr_un client_addr;
   socklen_t client_addr_len = sizeof(client_addr);
@@ -229,31 +293,60 @@ void McpTransportSocket::OnAcceptReady() {
     return;
   }
 
-  client_fd_.reset(client_fd);
-  client_connected_ = true;
+  // macOS: 클라이언트 소켓에 SO_NOSIGPIPE 설정
+#if defined(__APPLE__)
+  int nosigpipe = 1;
+  setsockopt(client_fd, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe,
+             sizeof(nosigpipe));
+#endif
 
-  LOG(INFO) << "[MCP] 클라이언트 연결 수락됨 (fd=" << client_fd << ")";
+  // 새 클라이언트 ID 부여
+  int client_id = next_client_id_++;
 
-  // 클라이언트 소켓 읽기를 전용 IO 스레드에서 시작한다.
+  LOG(INFO) << "[MCP] 클라이언트 연결 수락됨 (client_id=" << client_id
+            << ", fd=" << client_fd << ")";
+
+  // ClientInfo 생성
+  auto info = std::make_unique<ClientInfo>();
+  info->id = client_id;
+  info->fd.reset(client_fd);
+
+  // 클라이언트 전용 IO 스레드 생성 및 시작
+  std::string thread_name = "MCP-reader-" + base::NumberToString(client_id);
+  info->io_thread = std::make_unique<base::Thread>(thread_name);
+
   base::Thread::Options options;
   options.message_pump_type = base::MessagePumpType::IO;
-  if (!io_thread_.IsRunning()) {
-    io_thread_.StartWithOptions(std::move(options));
+  if (!info->io_thread->StartWithOptions(std::move(options))) {
+    LOG(ERROR) << "[MCP] IO 스레드 시작 실패 (client_id=" << client_id << ")";
+    return;
   }
 
-  io_thread_.task_runner()->PostTask(
+  // IO 스레드에서 ReadLoop 시작.
+  // fd 원시 값을 전달한다 (소유권은 ClientInfo가 유지).
+  info->io_thread->task_runner()->PostTask(
       FROM_HERE,
-      base::BindOnce(&McpTransportSocket::ReadLoop, base::Unretained(this)));
+      base::BindOnce(&McpTransportSocket::ReadLoop,
+                     base::Unretained(this),
+                     client_id,
+                     client_fd));
+
+  // clients_ 맵에 등록 (write_lock_ 보호)
+  {
+    base::AutoLock lock(write_lock_);
+    clients_[client_id] = std::move(info);
+  }
+
+  LOG(INFO) << "[MCP] 현재 연결된 클라이언트 수: " << clients_.size();
 }
 
-void McpTransportSocket::ReadLoop() {
-  // IO 스레드에서 실행된다.
-  // client_fd_에서 Content-Length 프레이밍된 MCP 메시지를 읽는다.
-  LOG(INFO) << "[MCP] 소켓 읽기 루프 시작";
+void McpTransportSocket::ReadLoop(int client_id, int fd) {
+  // 클라이언트 전용 IO 스레드에서 실행된다.
+  // 지정된 fd에서 Content-Length 프레이밍된 MCP 메시지를 읽는다.
+  LOG(INFO) << "[MCP] 소켓 읽기 루프 시작 (client_id=" << client_id
+            << ", fd=" << fd << ")";
 
-  const int fd = client_fd_.get();
-
-  while (running_ && client_connected_) {
+  while (running_) {
     // --- 1단계: Content-Length 헤더 파싱 ---
     size_t content_length = 0;
     bool found_content_length = false;
@@ -261,8 +354,9 @@ void McpTransportSocket::ReadLoop() {
     while (true) {
       std::string header_line;
       if (!ReadLine(fd, &header_line)) {
-        LOG(INFO) << "[MCP] 소켓 헤더 읽기 실패 또는 EOF";
-        HandleClientDisconnect();
+        LOG(INFO) << "[MCP] 소켓 헤더 읽기 실패 또는 EOF (client_id="
+                  << client_id << ")";
+        HandleClientDisconnect(client_id);
         return;
       }
 
@@ -279,29 +373,32 @@ void McpTransportSocket::ReadLoop() {
     }
 
     if (!found_content_length) {
-      LOG(WARNING) << "[MCP] Content-Length 헤더 없음, 건너뜀";
+      LOG(WARNING) << "[MCP] Content-Length 헤더 없음, 건너뜀 (client_id="
+                   << client_id << ")";
       continue;
     }
 
     if (content_length == 0 || content_length > kMaxMessageSize) {
-      LOG(WARNING) << "[MCP] 비정상 Content-Length: " << content_length;
-      HandleClientDisconnect();
+      LOG(WARNING) << "[MCP] 비정상 Content-Length: " << content_length
+                   << " (client_id=" << client_id << ")";
+      HandleClientDisconnect(client_id);
       return;
     }
 
     // --- 2단계: JSON 바디 읽기 ---
     std::string body;
     if (!ReadExactBytes(fd, content_length, &body)) {
-      LOG(ERROR) << "[MCP] 소켓 바디 읽기 실패";
-      HandleClientDisconnect();
+      LOG(ERROR) << "[MCP] 소켓 바디 읽기 실패 (client_id=" << client_id
+                 << ")";
+      HandleClientDisconnect(client_id);
       return;
     }
 
-    // --- 3단계: UI 스레드로 메시지 포스팅 ---
-    PostMessageToUIThread(std::move(body));
+    // --- 3단계: UI 스레드로 메시지 포스팅 (client_id 태깅) ---
+    PostMessageToUIThread(client_id, std::move(body));
   }
 
-  LOG(INFO) << "[MCP] 소켓 읽기 루프 종료";
+  LOG(INFO) << "[MCP] 소켓 읽기 루프 종료 (client_id=" << client_id << ")";
 }
 
 bool McpTransportSocket::ParseContentLengthHeader(
@@ -373,34 +470,57 @@ bool McpTransportSocket::ReadLine(int fd, std::string* out) const {
   }
 }
 
-void McpTransportSocket::PostMessageToUIThread(std::string message) {
+void McpTransportSocket::PostMessageToUIThread(int client_id,
+                                                std::string message) {
   ui_task_runner_->PostTask(
       FROM_HERE,
       base::BindOnce(
-          [](MessageCallback cb, std::string msg) {
-            if (cb) cb.Run(msg);
+          [](MessageCallback cb, int client_id, std::string msg) {
+            if (cb) cb.Run(client_id, msg);
           },
-          message_cb_, std::move(message)));
+          message_cb_, client_id, std::move(message)));
 }
 
-void McpTransportSocket::HandleClientDisconnect() {
-  // IO 스레드에서 호출. UI 스레드에 클라이언트 연결 종료를 알린다.
+void McpTransportSocket::HandleClientDisconnect(int client_id) {
+  // IO 스레드에서 호출. UI 스레드에 특정 클라이언트 연결 종료를 알린다.
   ui_task_runner_->PostTask(
       FROM_HERE,
       base::BindOnce(
           [](base::WeakPtr<McpTransportSocket> self,
+             int client_id,
              DisconnectCallback disconnect_cb) {
             if (!self) {
               return;
             }
-            self->client_connected_ = false;
-            self->client_fd_.reset();
-            LOG(INFO) << "[MCP] 클라이언트 연결 종료됨";
+
+            // clients_ 맵에서 해당 클라이언트를 꺼낸다.
+            // ClientInfo 소멸 시 Thread::Stop()이 호출되므로,
+            // 락을 잡은 채로 소멸시키면 데드락이 발생할 수 있다.
+            // (HandleClientDisconnect는 IO 스레드→UI 스레드 포스트이므로
+            //  UI 스레드에서 실행되지만, Thread::Stop()은 내부적으로
+            //  join을 수행하므로 이미 종료된 ReadLoop와 순서가 맞아야 함)
+            // ReadLoop는 이미 return했으므로 Thread::Stop()은 빠르게 완료된다.
+            std::unique_ptr<ClientInfo> removed_client;
+            {
+              base::AutoLock lock(self->write_lock_);
+              auto it = self->clients_.find(client_id);
+              if (it != self->clients_.end()) {
+                removed_client = std::move(it->second);
+                self->clients_.erase(it);
+              }
+            }
+            // 락 해제 후 ClientInfo 소멸 (Thread::Stop() 포함)
+
+            LOG(INFO) << "[MCP] 클라이언트 연결 종료됨 (client_id="
+                      << client_id << "), 남은 클라이언트: "
+                      << self->clients_.size();
+
+            // 연결 종료 콜백 호출 (클라이언트 ID 전달)
             if (disconnect_cb) {
-              std::move(disconnect_cb).Run();
+              disconnect_cb.Run(client_id);
             }
           },
-          weak_factory_.GetWeakPtr(), disconnect_cb_));
+          weak_factory_.GetWeakPtr(), client_id, disconnect_cb_));
 }
 
 }  // namespace mcp

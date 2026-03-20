@@ -162,6 +162,29 @@ std::string KeyNameToCode(const std::string& key) {
   return key;  // 인식되지 않는 키는 그대로 반환
 }
 
+// macOS 단축키에 대응하는 editing command를 반환한다.
+// CDP Input.dispatchKeyEvent의 "commands" 필드에 설정해야
+// macOS에서 Cmd+키 조합이 실제로 동작한다.
+std::string GetMacCommand(const std::string& key, int modifiers) {
+  // Meta(Cmd) 키가 포함된 경우만 처리
+  bool has_meta = (modifiers & 4) != 0;
+  bool has_shift = (modifiers & 8) != 0;
+  if (!has_meta) return "";
+
+  std::string lower_key = key;
+  if (lower_key.size() == 1 && lower_key[0] >= 'A' && lower_key[0] <= 'Z') {
+    lower_key[0] = lower_key[0] - 'A' + 'a';
+  }
+
+  if (lower_key == "a") return "selectAll";
+  if (lower_key == "c") return "copy";
+  if (lower_key == "v") return "paste";
+  if (lower_key == "x") return "cut";
+  if (lower_key == "z" && !has_shift) return "undo";
+  if (lower_key == "z" && has_shift) return "redo";
+  return "";
+}
+
 // Input.dispatchKeyEvent 파라미터 Dict 생성
 base::DictValue MakeKeyEventParams(const std::string& event_type,
                                      const std::string& key,
@@ -176,6 +199,17 @@ base::DictValue MakeKeyEventParams(const std::string& event_type,
     params.Set("windowsVirtualKeyCode", vk_code);
     params.Set("nativeVirtualKeyCode", vk_code);
   }
+
+  // macOS: keyDown 이벤트에 commands 필드를 추가해야 단축키가 동작한다.
+  if (event_type == "keyDown") {
+    std::string command = GetMacCommand(key, modifiers);
+    if (!command.empty()) {
+      base::ListValue commands;
+      commands.Append(command);
+      params.Set("commands", std::move(commands));
+    }
+  }
+
   return params;
 }
 
@@ -372,10 +406,41 @@ void KeyboardTool::DispatchNextChar(
     return;
   }
 
-  // 현재 문자 추출 (UTF-8 멀티바이트 처리는 단순 바이트 단위로 처리)
-  // ASCII 범위 문자에 대해 작동하며, 한글 등 멀티바이트는 insertText로 처리 권장
-  std::string current_char(1, remaining_text[0]);
-  std::string rest = remaining_text.substr(1);
+  // UTF-8 멀티바이트 문자 올바르게 추출.
+  // 한글은 3바이트, 이모지는 4바이트이므로 첫 바이트의 상위 비트로 길이 판별.
+  unsigned char first_byte = static_cast<unsigned char>(remaining_text[0]);
+  size_t char_len = 1;
+  if (first_byte >= 0xF0) {
+    char_len = 4;
+  } else if (first_byte >= 0xE0) {
+    char_len = 3;
+  } else if (first_byte >= 0xC0) {
+    char_len = 2;
+  }
+  // 문자열 끝을 넘지 않도록 보호
+  char_len = std::min(char_len, remaining_text.size());
+
+  std::string current_char = remaining_text.substr(0, char_len);
+  std::string rest = remaining_text.substr(char_len);
+
+  // 비ASCII 문자(한글, 이모지 등) 및 특수문자는 Input.insertText로 처리.
+  // keyDown/keyUp은 알파벳과 숫자, 공백에만 안전하다.
+  // 특수문자(!@#$% 등)는 VK 코드가 다른 키(PageUp 등)와 충돌할 수 있다.
+  bool is_simple_ascii = (first_byte >= 'a' && first_byte <= 'z') ||
+                         (first_byte >= 'A' && first_byte <= 'Z') ||
+                         (first_byte >= '0' && first_byte <= '9') ||
+                         first_byte == ' ';
+  if (!is_simple_ascii) {
+    base::DictValue params;
+    params.Set("text", current_char);
+    session->SendCdpCommand(
+        "Input.insertText", std::move(params),
+        base::BindOnce(&KeyboardTool::OnCharKeyUp,
+                       weak_factory_.GetWeakPtr(),
+                       std::move(rest), delay_ms, session,
+                       std::move(callback)));
+    return;
+  }
 
   base::DictValue params = MakeKeyEventParams("keyDown", current_char, 0);
   // 단일 문자 키에 text 필드 추가 (브라우저 입력 처리용)

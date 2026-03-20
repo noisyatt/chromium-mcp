@@ -24,6 +24,8 @@
 #include "content/public/browser/web_contents.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
+#include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/browser_commands.h"
 
 namespace mcp {
 

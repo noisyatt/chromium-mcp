@@ -13,6 +13,7 @@
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_session.h"
@@ -52,9 +53,16 @@
 #include "chrome/browser/mcp/tools/tab_tool.h"
 #include "chrome/browser/mcp/tools/wait_tool.h"
 #include "chrome/browser/mcp/tools/window_tool.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/web_contents.h"
+
+#include <signal.h>
 
 // MCP 커맨드라인 플래그 정의
 // 실제 배포 시 난독화된 이름으로 교체 가능
@@ -78,6 +86,9 @@ namespace mcp {
 
 McpServer::Config::Config() = default;
 McpServer::Config::~Config() = default;
+
+McpServer::ClientState::ClientState() = default;
+McpServer::ClientState::~ClientState() = default;
 
 McpToolDefinition::McpToolDefinition() = default;
 McpToolDefinition::~McpToolDefinition() = default;
@@ -106,6 +117,19 @@ void McpServer::StartWithSocket(const std::string& socket_path) {
   Initialize(std::move(config), nullptr);
 }
 
+void McpServer::PrepareConfig(std::unique_ptr<Config> config) {
+  pending_config_ = std::move(config);
+  LOG(INFO) << "[MCP] config 저장 완료. PostBrowserStart에서 서버 시작 예정.";
+}
+
+void McpServer::StartIfConfigured() {
+  if (!pending_config_) {
+    return;
+  }
+  LOG(INFO) << "[MCP] 지연 초기화 시작 (PostBrowserStart)";
+  Initialize(std::move(pending_config_), nullptr);
+}
+
 // static
 bool McpServer::ShouldStart() {
   // CHROMIUM_MCP=0 으로 명시적 비활성화하지 않는 한 항상 활성화.
@@ -123,7 +147,12 @@ bool McpServer::ShouldStart() {
 bool McpServer::Initialize(std::unique_ptr<Config> config,
                            content::BrowserContext* browser_context) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(browser_context);
+  // browser_context는 nullptr 허용 — PostEarlyInitialization 시점에는
+  // 아직 Profile이 생성되지 않았으므로, 이후 AttachToWebContents()에서
+  // WebContents를 통해 BrowserContext를 획득한다.
+
+  // SIGPIPE 무시: 소켓 write 시 상대방 연결 끊김으로 인한 프로세스 종료 방지
+  signal(SIGPIPE, SIG_IGN);
 
   config_ = std::move(config);
   browser_context_ = browser_context;
@@ -141,10 +170,12 @@ bool McpServer::Initialize(std::unique_ptr<Config> config,
   }
 
   // 전송 계층 시작: 메시지 수신 및 연결 해제 콜백 등록
+  // 클라이언트 연결 해제 시 서버를 종료하지 않고 핸드셰이크만 리셋하여
+  // 새 클라이언트 연결을 기다린다.
   transport_->Start(
       base::BindRepeating(&McpServer::OnMessageReceived,
                           weak_factory_.GetWeakPtr()),
-      base::BindRepeating(&McpServer::Shutdown,
+      base::BindRepeating(&McpServer::OnClientDisconnected,
                           weak_factory_.GetWeakPtr()));
 
   // 기본 내장 도구 등록 (navigate, screenshot 등)
@@ -157,6 +188,9 @@ bool McpServer::Initialize(std::unique_ptr<Config> config,
 void McpServer::Shutdown() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   LOG(INFO) << "[MCP] 서버 종료 시작";
+
+  // 모든 클라이언트 상태 정리
+  client_states_.clear();
 
   // 모든 세션 종료 (DevToolsAgentHost 연결 해제)
   sessions_.clear();
@@ -171,6 +205,16 @@ void McpServer::Shutdown() {
   LOG(INFO) << "[MCP] 서버 종료 완료";
 }
 
+void McpServer::OnClientDisconnected(int client_id) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  LOG(INFO) << "[MCP] 클라이언트 연결 해제됨 (client_id=" << client_id
+            << "). 해당 클라이언트 상태 제거.";
+
+  // 해당 클라이언트의 상태만 제거한다.
+  // 다른 클라이언트는 영향 없이 계속 동작한다.
+  client_states_.erase(client_id);
+}
+
 // -----------------------------------------------------------------------
 // 탭(WebContents) 연결 관리
 // -----------------------------------------------------------------------
@@ -179,6 +223,11 @@ McpSession* McpServer::AttachToWebContents(
     content::WebContents* web_contents) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(web_contents);
+
+  // 초기화 시 browser_context가 없었으면 여기서 획득
+  if (!browser_context_) {
+    browser_context_ = web_contents->GetBrowserContext();
+  }
 
   // 이미 세션이 존재하면 기존 세션 반환
   auto it = sessions_.find(web_contents);
@@ -199,10 +248,12 @@ McpSession* McpServer::AttachToWebContents(
   }
 
   // McpSession 생성: DevToolsAgentHostClient 인터페이스 구현체
+  // CDP 이벤트는 모든 클라이언트에게 브로드캐스트 (client_id=-1)
   auto session = std::make_unique<McpSession>(
       agent_host,
       base::BindRepeating(&McpServer::SendMessage,
-                          weak_factory_.GetWeakPtr()));
+                          weak_factory_.GetWeakPtr(),
+                          /*client_id=*/-1));
 
   // 세션을 통해 CDP 연결 활성화
   if (!session->Attach()) {
@@ -255,43 +306,49 @@ McpSession* McpServer::GetActiveSession() {
 // JSON-RPC 메시지 수신 및 라우팅
 // -----------------------------------------------------------------------
 
-void McpServer::OnMessageReceived(const std::string& json_message) {
+void McpServer::OnMessageReceived(int client_id,
+                                   const std::string& json_message) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // JSON 파싱
   auto parsed = base::JSONReader::ReadAndReturnValueWithError(json_message, base::JSON_PARSE_RFC);
   if (!parsed.has_value()) {
-    LOG(WARNING) << "[MCP] JSON 파싱 실패: " << parsed.error().message;
-    // id를 알 수 없으므로 null로 오류 응답
-    SendError(nullptr, kJsonRpcParseError, "Parse error: " + parsed.error().message);
+    LOG(WARNING) << "[MCP] JSON 파싱 실패 (client_id=" << client_id
+                 << "): " << parsed.error().message;
+    SendError(client_id, nullptr, kJsonRpcParseError,
+              "Parse error: " + parsed.error().message);
     return;
   }
 
   if (!parsed->is_dict()) {
-    LOG(WARNING) << "[MCP] JSON-RPC 메시지가 객체 형식이 아님";
-    SendError(nullptr, kJsonRpcInvalidRequest, "Request must be a JSON object");
+    LOG(WARNING) << "[MCP] JSON-RPC 메시지가 객체 형식이 아님 (client_id="
+                 << client_id << ")";
+    SendError(client_id, nullptr, kJsonRpcInvalidRequest,
+              "Request must be a JSON object");
     return;
   }
 
-  HandleMessage(std::move(parsed->GetDict()));
+  HandleMessage(client_id, std::move(parsed->GetDict()));
 }
 
-void McpServer::HandleMessage(base::DictValue message) {
+void McpServer::HandleMessage(int client_id, base::DictValue message) {
   // jsonrpc 버전 검증
   const std::string* jsonrpc = message.FindString("jsonrpc");
   if (!jsonrpc || *jsonrpc != "2.0") {
-    LOG(WARNING) << "[MCP] jsonrpc 버전이 2.0이 아님";
+    LOG(WARNING) << "[MCP] jsonrpc 버전이 2.0이 아님 (client_id="
+                 << client_id << ")";
     const base::Value* id = message.Find("id");
-    SendError(id, kJsonRpcInvalidRequest, "jsonrpc must be \"2.0\"");
+    SendError(client_id, id, kJsonRpcInvalidRequest,
+              "jsonrpc must be \"2.0\"");
     return;
   }
 
   // method 추출
   const std::string* method = message.FindString("method");
   if (!method) {
-    LOG(WARNING) << "[MCP] method 필드 없음";
+    LOG(WARNING) << "[MCP] method 필드 없음 (client_id=" << client_id << ")";
     const base::Value* id = message.Find("id");
-    SendError(id, kJsonRpcInvalidRequest, "Missing method field");
+    SendError(client_id, id, kJsonRpcInvalidRequest, "Missing method field");
     return;
   }
 
@@ -299,20 +356,20 @@ void McpServer::HandleMessage(base::DictValue message) {
   const base::Value* id = message.Find("id");
   const base::DictValue* params = message.FindDict("params");
 
-  LOG(INFO) << "[MCP] 수신된 method: " << *method;
+  LOG(INFO) << "[MCP] 수신된 method: " << *method
+            << " (client_id=" << client_id << ")";
 
   // method에 따라 핸들러 라우팅
   if (*method == "initialize") {
-    HandleInitialize(id, params);
+    HandleInitialize(client_id, id, params);
   } else if (*method == "notifications/initialized") {
-    HandleInitialized();
+    HandleInitialized(client_id);
   } else if (*method == "tools/list") {
-    HandleToolsList(id);
+    HandleToolsList(client_id, id);
   } else if (*method == "tools/call") {
-    HandleToolsCall(id, params);
+    HandleToolsCall(client_id, id, params);
   } else {
-    // 알 수 없는 method: 표준 JSON-RPC 오류 응답
-    HandleUnknownMethod(id, *method);
+    HandleUnknownMethod(client_id, id, *method);
   }
 }
 
@@ -320,35 +377,39 @@ void McpServer::HandleMessage(base::DictValue message) {
 // MCP 프로토콜 핸드셰이크
 // -----------------------------------------------------------------------
 
-void McpServer::HandleInitialize(const base::Value* id,
+void McpServer::HandleInitialize(int client_id, const base::Value* id,
                                   const base::DictValue* params) {
+  // 해당 클라이언트의 상태 가져오기 (없으면 새로 생성)
+  auto& state = client_states_[client_id];
+
   // 이미 초기화된 경우 재초기화 무시
-  if (handshake_state_ != HandshakeState::kNotStarted) {
-    LOG(WARNING) << "[MCP] 이미 초기화됨. initialize 요청 무시.";
-    SendError(id, kJsonRpcInvalidRequest, "Already initialized");
+  if (state.handshake_state != HandshakeState::kNotStarted) {
+    LOG(WARNING) << "[MCP] 이미 초기화됨 (client_id=" << client_id
+                 << "). initialize 요청 무시.";
+    SendError(client_id, id, kJsonRpcInvalidRequest, "Already initialized");
     return;
   }
 
   // 클라이언트 정보 저장
   if (params) {
     if (const std::string* ver = params->FindString("protocolVersion")) {
-      protocol_version_ = *ver;
+      state.protocol_version = *ver;
     }
     if (const base::DictValue* client_info = params->FindDict("clientInfo")) {
       if (const std::string* name = client_info->FindString("name")) {
-        client_name_ = *name;
+        state.client_name = *name;
       }
       if (const std::string* version = client_info->FindString("version")) {
-        client_version_ = *version;
+        state.client_version = *version;
       }
     }
   }
 
-  LOG(INFO) << "[MCP] 클라이언트 연결: " << client_name_
-            << " v" << client_version_
-            << " (프로토콜: " << protocol_version_ << ")";
+  LOG(INFO) << "[MCP] 클라이언트 연결 (client_id=" << client_id << "): "
+            << state.client_name << " v" << state.client_version
+            << " (프로토콜: " << state.protocol_version << ")";
 
-  handshake_state_ = HandshakeState::kInitializing;
+  state.handshake_state = HandshakeState::kInitializing;
 
   // MCP initialize 응답 구성.
   // serverInfo: 이 서버의 이름과 버전
@@ -367,22 +428,36 @@ void McpServer::HandleInitialize(const base::Value* id,
   result.Set("serverInfo", std::move(server_info));
   result.Set("capabilities", std::move(capabilities));
 
-  SendResult(id, base::Value(std::move(result)));
+  SendResult(client_id, id, base::Value(std::move(result)));
 }
 
-void McpServer::HandleInitialized() {
+void McpServer::HandleInitialized(int client_id) {
   // notifications/initialized는 응답이 없는 알림(notification)
-  if (handshake_state_ != HandshakeState::kInitializing) {
-    LOG(WARNING) << "[MCP] 잘못된 상태에서 initialized 수신";
+  auto it = client_states_.find(client_id);
+  if (it == client_states_.end() ||
+      it->second.handshake_state != HandshakeState::kInitializing) {
+    LOG(WARNING) << "[MCP] 잘못된 상태에서 initialized 수신 (client_id="
+                 << client_id << ")";
     return;
   }
 
-  handshake_state_ = HandshakeState::kReady;
-  LOG(INFO) << "[MCP] 핸드셰이크 완료. 도구 호출 대기 중.";
+  it->second.handshake_state = HandshakeState::kReady;
+  LOG(INFO) << "[MCP] 핸드셰이크 완료 (client_id=" << client_id
+            << "). 도구 호출 대기 중.";
 
   // 활성 탭이 있으면 자동으로 세션 연결
-  if (config_ && config_->auto_attach_active_tab && active_web_contents_) {
-    AttachToWebContents(active_web_contents_);
+  if (config_ && config_->auto_attach_active_tab) {
+    if (!active_web_contents_) {
+      // BrowserList에서 활성 탭 탐색
+      Browser* browser = chrome::FindLastActive();
+      if (browser && browser->tab_strip_model()) {
+        active_web_contents_ =
+            browser->tab_strip_model()->GetActiveWebContents();
+      }
+    }
+    if (active_web_contents_) {
+      AttachToWebContents(active_web_contents_);
+    }
   }
 }
 
@@ -390,9 +465,12 @@ void McpServer::HandleInitialized() {
 // tools/list 처리
 // -----------------------------------------------------------------------
 
-void McpServer::HandleToolsList(const base::Value* id) {
-  if (handshake_state_ != HandshakeState::kReady) {
-    SendError(id, kJsonRpcInvalidRequest, "Server not ready. Call initialize first.");
+void McpServer::HandleToolsList(int client_id, const base::Value* id) {
+  auto it = client_states_.find(client_id);
+  if (it == client_states_.end() ||
+      it->second.handshake_state != HandshakeState::kReady) {
+    SendError(client_id, id, kJsonRpcInvalidRequest,
+              "Server not ready. Call initialize first.");
     return;
   }
 
@@ -422,30 +500,34 @@ void McpServer::HandleToolsList(const base::Value* id) {
   result.Set("tools", std::move(tools_array));
 
   size_t total = tools_.size() + (tool_registry_ ? tool_registry_->GetToolCount() : 0);
-  LOG(INFO) << "[MCP] tools/list 응답: " << total << "개 도구";
-  SendResult(id, base::Value(std::move(result)));
+  LOG(INFO) << "[MCP] tools/list 응답: " << total << "개 도구 (client_id="
+            << client_id << ")";
+  SendResult(client_id, id, base::Value(std::move(result)));
 }
 
 // -----------------------------------------------------------------------
 // tools/call 처리
 // -----------------------------------------------------------------------
 
-void McpServer::HandleToolsCall(const base::Value* id,
+void McpServer::HandleToolsCall(int client_id, const base::Value* id,
                                  const base::DictValue* params) {
-  if (handshake_state_ != HandshakeState::kReady) {
-    SendError(id, kJsonRpcInvalidRequest, "Server not ready. Call initialize first.");
+  auto state_it = client_states_.find(client_id);
+  if (state_it == client_states_.end() ||
+      state_it->second.handshake_state != HandshakeState::kReady) {
+    SendError(client_id, id, kJsonRpcInvalidRequest,
+              "Server not ready. Call initialize first.");
     return;
   }
 
   if (!params) {
-    SendError(id, kJsonRpcInvalidParams, "Missing params");
+    SendError(client_id, id, kJsonRpcInvalidParams, "Missing params");
     return;
   }
 
   // 도구 이름 추출
   const std::string* tool_name = params->FindString("name");
   if (!tool_name) {
-    SendError(id, kJsonRpcInvalidParams, "Missing tool name");
+    SendError(client_id, id, kJsonRpcInvalidParams, "Missing tool name");
     return;
   }
 
@@ -456,6 +538,21 @@ void McpServer::HandleToolsCall(const base::Value* id,
 
   LOG(INFO) << "[MCP] 도구 실행: " << *tool_name;
 
+  // 세션이 없으면 활성 브라우저 탭에 자동 연결 시도
+  if (!GetActiveSession()) {
+    LOG(INFO) << "[MCP] 활성 세션 없음. 자동 attach 시도...";
+    Browser* browser = chrome::FindLastActive();
+    if (browser && browser->tab_strip_model()) {
+      content::WebContents* wc =
+          browser->tab_strip_model()->GetActiveWebContents();
+      if (wc) {
+        AttachToWebContents(wc);
+        LOG(INFO) << "[MCP] 자동 attach 성공: "
+                  << wc->GetVisibleURL().spec();
+      }
+    }
+  }
+
   // id 복사본 생성 (비동기 콜백에서 사용하기 위해)
   std::optional<base::Value> id_copy;
   if (id) {
@@ -464,50 +561,60 @@ void McpServer::HandleToolsCall(const base::Value* id,
 
   auto result_callback = base::BindOnce(
       [](base::WeakPtr<McpServer> server,
+         int client_id,
          std::optional<base::Value> id_copy,
          base::Value result) {
         if (!server) return;
         const base::Value* id_ptr =
             id_copy.has_value() ? &id_copy.value() : nullptr;
-        server->SendResult(id_ptr, std::move(result));
+        server->SendResult(client_id, id_ptr, std::move(result));
       },
-      weak_factory_.GetWeakPtr(), std::move(id_copy));
+      weak_factory_.GetWeakPtr(), client_id, std::move(id_copy));
 
   // 1. 인라인 등록 도구에서 검색
   auto it = tools_.find(*tool_name);
   if (it != tools_.end()) {
+    LOG(INFO) << "[MCP] 인라인 도구 실행 시작: " << *tool_name;
     it->second.handler.Run(tool_args, std::move(result_callback));
+    LOG(INFO) << "[MCP] 인라인 도구 핸들러 반환됨: " << *tool_name;
     return;
   }
 
   // 2. McpToolRegistry 기반 도구에서 검색
   if (tool_registry_) {
+    McpSession* session = GetActiveSession();
+    if (!session) {
+      LOG(WARNING) << "[MCP] 세션 없이 registry 도구 호출: " << *tool_name;
+    }
     tool_registry_->DispatchToolCall(
-        *tool_name, tool_args, GetActiveSession(), std::move(result_callback));
+        *tool_name, tool_args, session, std::move(result_callback));
     return;
   }
 
   LOG(WARNING) << "[MCP] 알 수 없는 도구: " << *tool_name;
-  SendError(id, kJsonRpcMethodNotFound,
+  SendError(client_id, id, kJsonRpcMethodNotFound,
             "Tool not found: " + *tool_name);
 }
 
-void McpServer::HandleUnknownMethod(const base::Value* id,
+void McpServer::HandleUnknownMethod(int client_id, const base::Value* id,
                                      const std::string& method) {
-  LOG(WARNING) << "[MCP] 알 수 없는 method: " << method;
+  LOG(WARNING) << "[MCP] 알 수 없는 method: " << method
+               << " (client_id=" << client_id << ")";
   // notifications/* 형식은 알림이므로 응답 불필요
   if (base::StartsWith(method, "notifications/",
                         base::CompareCase::SENSITIVE)) {
     return;
   }
-  SendError(id, kJsonRpcMethodNotFound, "Method not found: " + method);
+  SendError(client_id, id, kJsonRpcMethodNotFound,
+            "Method not found: " + method);
 }
 
 // -----------------------------------------------------------------------
 // JSON-RPC 응답 전송 헬퍼
 // -----------------------------------------------------------------------
 
-void McpServer::SendResult(const base::Value* id, base::Value result) {
+void McpServer::SendResult(int client_id, const base::Value* id,
+                            base::Value result) {
   base::DictValue response;
   response.Set("jsonrpc", "2.0");
   if (id) {
@@ -516,10 +623,10 @@ void McpServer::SendResult(const base::Value* id, base::Value result) {
     response.Set("id", base::Value());  // null
   }
   response.Set("result", std::move(result));
-  SendMessage(std::move(response));
+  SendMessage(client_id, std::move(response));
 }
 
-void McpServer::SendError(const base::Value* id,
+void McpServer::SendError(int client_id, const base::Value* id,
                            int code,
                            const std::string& message) {
   base::DictValue error_obj;
@@ -534,10 +641,10 @@ void McpServer::SendError(const base::Value* id,
     response.Set("id", base::Value());  // null
   }
   response.Set("error", std::move(error_obj));
-  SendMessage(std::move(response));
+  SendMessage(client_id, std::move(response));
 }
 
-void McpServer::SendMessage(base::DictValue message) {
+void McpServer::SendMessage(int client_id, base::DictValue message) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // base::Value를 JSON 문자열로 직렬화
@@ -549,11 +656,11 @@ void McpServer::SendMessage(base::DictValue message) {
 
   // transport가 없으면 (테스트 환경 등) 로그만 출력
   if (!transport_) {
-    LOG(INFO) << "[MCP] 전송: " << json_output;
+    LOG(INFO) << "[MCP] 전송 (client_id=" << client_id << "): " << json_output;
     return;
   }
 
-  transport_->Send(json_output);
+  transport_->Send(client_id, json_output);
 }
 
 // -----------------------------------------------------------------------
@@ -583,7 +690,6 @@ void McpServer::RegisterBuiltinTools() {
   RegisterEvaluateTool();
   RegisterNetworkCaptureTool();
   RegisterNetworkRequestsTool();
-  RegisterTabsTool();
   RegisterBrowserInfoTool();
 
   // ===== 신규 McpTool 인터페이스 기반 도구 =====
@@ -609,6 +715,7 @@ void McpServer::RegisterBuiltinTools() {
   // 브라우저 유틸
   tool_registry_->RegisterTool(std::make_unique<DialogTool>());
   tool_registry_->RegisterTool(std::make_unique<EmulationTool>());
+  tool_registry_->RegisterTool(std::make_unique<TabsTool>());
   tool_registry_->RegisterTool(std::make_unique<WindowTool>());
   tool_registry_->RegisterTool(std::make_unique<WaitTool>());
 
@@ -1542,38 +1649,45 @@ void McpServer::ExecuteTabs(const base::DictValue& params,
 void McpServer::ExecuteBrowserInfo(
     const base::DictValue& params,
     base::OnceCallback<void(base::Value)> callback) {
+  LOG(INFO) << "[MCP] ExecuteBrowserInfo 시작";
+
   base::DictValue info;
 
   // 브라우저 버전 정보
-  // 실제 구현: version_info::GetVersionNumber()
   info.Set("browserName", "Chromium-MCP");
-  info.Set("browserVersion", "130.0.0");  // 빌드 시 실제 버전으로 교체
+  info.Set("browserVersion", "130.0.0");
 
-  // 활성 탭 정보
-  if (active_web_contents_) {
-    auto it = sessions_.find(active_web_contents_);
-    if (it != sessions_.end()) {
-      // 실제 구현: web_contents->GetVisibleURL().spec()
-      info.Set("activeTabUrl", "https://example.com");
-      info.Set("activeTabTitle", "Active Tab");
+  // 활성 탭 정보 안전하게 조회
+  Browser* browser = chrome::FindLastActive();
+  if (browser && browser->tab_strip_model()) {
+    content::WebContents* wc =
+        browser->tab_strip_model()->GetActiveWebContents();
+    if (wc) {
+      info.Set("activeTabUrl", wc->GetVisibleURL().spec());
+      info.Set("activeTabTitle", base::UTF16ToUTF8(wc->GetTitle()));
+      if (!active_web_contents_) {
+        active_web_contents_ = wc;
+      }
     }
   }
 
-  // 열린 탭 수: DevToolsAgentHost::GetAll()로 조회
-  content::DevToolsAgentHost::List all_hosts =
-      content::DevToolsAgentHost::GetAll();
+  // 탭/브라우저 수
+  int browser_count = static_cast<int>(chrome::GetTotalBrowserCount());
   int page_count = 0;
-  for (const auto& host : all_hosts) {
-    if (host->GetType() == content::DevToolsAgentHost::kTypePage) {
-      ++page_count;
-    }
+  if (browser) {
+    page_count = browser->tab_strip_model()
+                     ? browser->tab_strip_model()->count()
+                     : 0;
   }
   info.Set("tabCount", page_count);
+  info.Set("browserCount", browser_count);
   info.Set("mcpServerName", kMcpServerName);
   info.Set("mcpProtocolVersion", kMcpProtocolVersion);
 
   std::string json_output;
   base::JSONWriter::Write(base::Value(info.Clone()), &json_output);
+
+  LOG(INFO) << "[MCP] ExecuteBrowserInfo 완료: " << json_output;
   std::move(callback).Run(MakeTextResult(json_output));
 }
 
