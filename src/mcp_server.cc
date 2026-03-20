@@ -293,7 +293,12 @@ void McpServer::DetachFromWebContents(content::WebContents* web_contents) {
 McpSession* McpServer::GetActiveSession() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  // 레거시 호환: 인라인 도구에서 사용. 첫 번째 연결된 클라이언트의 탭 반환.
+  // 인라인 도구 실행 중이면 현재 클라이언트의 세션 반환
+  if (current_inline_client_id_ >= 0) {
+    return GetSessionForClient(current_inline_client_id_);
+  }
+
+  // 폴백: 첫 번째 배정된 클라이언트의 탭 반환
   for (const auto& [id, state] : client_states_) {
     if (state.assigned_tab) {
       auto it = sessions_.find(state.assigned_tab);
@@ -641,15 +646,47 @@ void McpServer::HandleToolsCall(int client_id, const base::Value* id,
   auto it = tools_.find(*tool_name);
   if (it != tools_.end()) {
     LOG(INFO) << "[MCP] 인라인 도구 실행 시작: " << *tool_name;
+    // 인라인 도구가 GetActiveSession() 호출 시 이 클라이언트의 세션 반환
+    current_inline_client_id_ = client_id;
     it->second.handler.Run(tool_args, std::move(result_callback));
+    current_inline_client_id_ = -1;
     LOG(INFO) << "[MCP] 인라인 도구 핸들러 반환됨: " << *tool_name;
     return;
   }
 
   // 2. McpToolRegistry 기반 도구에서 검색
   if (tool_registry_) {
-    tool_registry_->DispatchToolCall(
-        *tool_name, tool_args, client_session, std::move(result_callback));
+    // tabs new/select 완료 후 호출 클라이언트의 assigned_tab 갱신
+    const std::string* action = tool_args.FindString("action");
+    bool needs_tab_reassign =
+        (*tool_name == "tabs") && action &&
+        (*action == "new" || *action == "select");
+
+    if (needs_tab_reassign) {
+      auto wrapped_cb = base::BindOnce(
+          [](base::WeakPtr<McpServer> server, int cid,
+             base::OnceCallback<void(base::Value)> orig_cb,
+             base::Value result) {
+            if (server) {
+              Browser* browser = chrome::FindLastActive();
+              if (browser && browser->tab_strip_model()) {
+                content::WebContents* wc =
+                    browser->tab_strip_model()->GetActiveWebContents();
+                if (wc) {
+                  server->AssignTabToClient(cid, wc);
+                }
+              }
+            }
+            std::move(orig_cb).Run(std::move(result));
+          },
+          weak_factory_.GetWeakPtr(), client_id,
+          std::move(result_callback));
+      tool_registry_->DispatchToolCall(
+          *tool_name, tool_args, client_session, std::move(wrapped_cb));
+    } else {
+      tool_registry_->DispatchToolCall(
+          *tool_name, tool_args, client_session, std::move(result_callback));
+    }
     return;
   }
 

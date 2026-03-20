@@ -240,8 +240,9 @@ class ChromiumManager:
                 continue
 
             # 프로세스 종료됨
-            if exit_code == 0:
-                log.info('Chromium 정상 종료 (exit=0) — 재시작 안 함')
+            # exit 0 = 정상 종료, -15 = SIGTERM (macOS Cmd+Q)
+            if exit_code in (0, -15):
+                log.info(f'Chromium 정상 종료 (exit={exit_code}) — 재시작 안 함')
                 with self._cond:
                     if self._state == State.READY:
                         self._state = State.STOPPED

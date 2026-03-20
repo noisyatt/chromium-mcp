@@ -329,7 +329,9 @@ class McpServer {
   std::unordered_map<content::WebContents*, std::unique_ptr<McpSession>>
       sessions_;
 
-  // [제거됨] active_web_contents_ — client_states_[].assigned_tab으로 대체
+  // 인라인 도구 실행 중 현재 클라이언트 ID (-1이면 미설정)
+  // GetActiveSession()에서 이 값으로 GetSessionForClient() 호출
+  int current_inline_client_id_ = -1;
 
   // 등록된 MCP 도구 목록 (name → definition) — 레거시 인라인 핸들러용
   std::unordered_map<std::string, McpToolDefinition> tools_;
