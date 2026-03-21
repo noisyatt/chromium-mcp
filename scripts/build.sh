@@ -250,6 +250,9 @@ if [[ "$(uname -s)" == "Darwin" ]] && [[ -d "${CHROME_APP}" ]]; then
     info "코드 서명 중... (${CODESIGN_IDENTITY})"
     if codesign --force --deep -s "${CODESIGN_IDENTITY}" "${CHROME_APP}" 2>&1; then
       success "코드 서명 완료"
+      # Launch Services 캐시 갱신 (LSEnvironment 반영)
+      /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "${CHROME_APP}" 2>/dev/null \
+        && success "Launch Services 캐시 갱신 완료"
     else
       warn "코드 서명 실패 — 키체인 접근을 확인하세요."
     fi
