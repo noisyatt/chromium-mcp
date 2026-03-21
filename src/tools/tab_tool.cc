@@ -222,6 +222,39 @@ void TabsTool::HandleNew(const std::string& url,
     return;
   }
 
+  // about:blank 탭이 있으면 재사용 (새 탭 생성 대신 navigate)
+  TabStripModel* tab_strip = browser->tab_strip_model();
+  if (tab_strip && !url.empty()) {
+    for (int i = 0; i < tab_strip->count(); ++i) {
+      content::WebContents* wc = tab_strip->GetWebContentsAt(i);
+      GURL visible_url = wc->GetVisibleURL();
+      if (wc && (visible_url == GURL("about:blank") ||
+                 visible_url == GURL("chrome://newtab/"))) {
+        LOG(INFO) << "[MCP][Tabs] about:blank 탭 재사용 (index=" << i << ")";
+        tab_strip->ActivateTabAt(i);
+        content::NavigationController::LoadURLParams load_params(target_url);
+        load_params.transition_type = ui::PAGE_TRANSITION_AUTO_TOPLEVEL;
+        wc->GetController().LoadURLWithParams(load_params);
+        browser->window()->Activate();
+
+        base::DictValue tab_info = SerializeTab(wc, i, true);
+        std::string json_str;
+        base::JSONWriter::WriteWithOptions(
+            base::Value(std::move(tab_info)),
+            base::JSONWriter::OPTIONS_PRETTY_PRINT, &json_str);
+        base::DictValue result;
+        base::DictValue content_item;
+        content_item.Set("type", "text");
+        content_item.Set("text", json_str);
+        base::ListValue content;
+        content.Append(std::move(content_item));
+        result.Set("content", std::move(content));
+        std::move(callback).Run(base::Value(std::move(result)));
+        return;
+      }
+    }
+  }
+
   // NavigateParams를 구성하여 새 탭으로 이동
   // NEW_FOREGROUND_TAB: 새 탭을 열고 즉시 포커스
   NavigateParams params(browser, target_url,
@@ -244,7 +277,7 @@ void TabsTool::HandleNew(const std::string& url,
     return;
   }
 
-  TabStripModel* tab_strip = browser->tab_strip_model();
+  tab_strip = browser->tab_strip_model();
   int new_index = tab_strip->GetIndexOfWebContents(new_contents);
   base::DictValue tab_info =
       SerializeTab(new_contents, new_index, true);
