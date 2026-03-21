@@ -127,6 +127,7 @@ class ChromiumManager:
             self._cond.notify_all()
             proc = self._proc
         if proc is not None:
+            _fix_exit_type()
             try:
                 proc.terminate()
                 proc.wait(timeout=15)
@@ -331,6 +332,35 @@ def _connect_chromium_with_retry() -> socket.socket | None:
             if attempt < MAX_RETRY:
                 time.sleep(RETRY_DELAY)
     return None
+
+
+# ---------------------------------------------------------------------------
+# exit_type 정상 종료 마킹
+# ---------------------------------------------------------------------------
+
+import glob
+
+
+def _fix_exit_type() -> None:
+    """Chromium 프로필의 exit_type을 Normal로 변경한다.
+
+    SIGTERM으로 종료하면 exit_type이 Crashed로 남아
+    다음 시작 시 무조건 세션 복원이 강제되는 문제를 방지한다.
+    """
+    prefs_pattern = os.path.expanduser(
+        '~/Library/Application Support/Chromium/*/Preferences'
+    )
+    for prefs_path in glob.glob(prefs_pattern):
+        try:
+            with open(prefs_path) as f:
+                prefs = json.load(f)
+            if prefs.get('profile', {}).get('exit_type') != 'Normal':
+                prefs.setdefault('profile', {})['exit_type'] = 'Normal'
+                with open(prefs_path, 'w') as f:
+                    json.dump(prefs, f)
+                log.info(f'exit_type → Normal: {prefs_path}')
+        except Exception as e:
+            log.warning(f'exit_type 수정 실패: {prefs_path}: {e}')
 
 
 # ---------------------------------------------------------------------------
