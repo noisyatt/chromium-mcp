@@ -334,33 +334,243 @@ def _connect_chromium_with_retry() -> socket.socket | None:
 
 
 # ---------------------------------------------------------------------------
+# Content-Length 프레이밍 유틸리티
+# ---------------------------------------------------------------------------
+
+TOOLS_CACHE = os.path.expanduser('~/.chromium-mcp/tools_cache.json')
+
+import json
+
+
+def _recv_message(sock: socket.socket, buf: bytearray) -> tuple[dict | None, bytearray]:
+    """Content-Length 프레이밍된 메시지를 1개 읽어 dict로 반환한다.
+    반환: (파싱된 dict 또는 None, 남은 버퍼)"""
+    while True:
+        header_end = buf.find(b'\r\n\r\n')
+        if header_end >= 0:
+            header = buf[:header_end]
+            content_length = None
+            for line in header.split(b'\r\n'):
+                if line.lower().startswith(b'content-length:'):
+                    content_length = int(line.split(b':', 1)[1].strip())
+            if content_length is None:
+                return None, buf
+            body_start = header_end + 4
+            body_end = body_start + content_length
+            if len(buf) >= body_end:
+                body = buf[body_start:body_end]
+                buf = buf[body_end:]
+                try:
+                    return json.loads(body), buf
+                except json.JSONDecodeError:
+                    return None, buf
+        # 데이터 더 필요
+        try:
+            data = sock.recv(65536)
+            if not data:
+                return None, buf
+            buf.extend(data)
+        except Exception:
+            return None, buf
+
+
+def _send_message(sock: socket.socket, msg: dict) -> bool:
+    """Content-Length 프레이밍으로 메시지를 전송한다."""
+    body = json.dumps(msg).encode()
+    frame = b'Content-Length: ' + str(len(body)).encode() + b'\r\n\r\n' + body
+    try:
+        sock.sendall(frame)
+        return True
+    except Exception:
+        return False
+
+
+def _load_tools_cache() -> list | None:
+    """캐시된 도구 목록을 로드한다."""
+    if not os.path.isfile(TOOLS_CACHE):
+        return None
+    try:
+        with open(TOOLS_CACHE) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _save_tools_cache(tools: list) -> None:
+    """도구 목록을 캐시에 저장한다."""
+    os.makedirs(os.path.dirname(TOOLS_CACHE), exist_ok=True)
+    with open(TOOLS_CACHE, 'w') as f:
+        json.dump(tools, f)
+
+
+def _do_chromium_handshake(cr_sock: socket.socket) -> list | None:
+    """Chromium과 MCP 핸드셰이크 후 도구 목록을 반환한다."""
+    buf = bytearray()
+
+    # initialize
+    init_req = {
+        'jsonrpc': '2.0', 'id': '__daemon_init__',
+        'method': 'initialize',
+        'params': {
+            'protocolVersion': '2024-11-05',
+            'capabilities': {},
+            'clientInfo': {'name': 'chromium-mcp-daemon', 'version': '1.0'}
+        }
+    }
+    if not _send_message(cr_sock, init_req):
+        return None
+    resp, buf = _recv_message(cr_sock, buf)
+    if not resp:
+        return None
+
+    # notifications/initialized
+    _send_message(cr_sock, {
+        'jsonrpc': '2.0',
+        'method': 'notifications/initialized'
+    })
+
+    # tools/list
+    list_req = {'jsonrpc': '2.0', 'id': '__daemon_tools__', 'method': 'tools/list'}
+    if not _send_message(cr_sock, list_req):
+        return None
+    resp, buf = _recv_message(cr_sock, buf)
+    if not resp:
+        return None
+
+    tools = resp.get('result', {}).get('tools', [])
+    _save_tools_cache(tools)
+    return tools
+
+
+# ---------------------------------------------------------------------------
 # 클라이언트 핸들러
 # ---------------------------------------------------------------------------
 
 def handle_client(client_sock: socket.socket, manager: ChromiumManager) -> None:
-    """클라이언트 연결 처리 — Chromium 소켓과 브릿지."""
+    """MCP 프로토콜을 인식하는 스마트 프록시.
+
+    - initialize, tools/list: 데몬이 직접 응답 (Chromium 시작 안 함)
+    - tools/call 등 실제 호출: Chromium 시작 후 브릿지 전환
+    """
     addr = id(client_sock)
     log.info(f'[{addr}] 클라이언트 연결')
 
-    if not manager.wait_ready(timeout=30):
-        log.error(f'[{addr}] Chromium 준비 실패, 연결 거부')
-        client_sock.close()
-        return
+    buf = bytearray()
+    chromium_initialized = False
+    cr_sock = None
 
-    cr_sock = _connect_chromium_with_retry()
-    if cr_sock is None:
-        log.error(f'[{addr}] Chromium 소켓 연결 최종 실패')
-        client_sock.close()
-        return
+    try:
+        while True:
+            msg, buf = _recv_message(client_sock, buf)
+            if msg is None:
+                log.info(f'[{addr}] 클라이언트 종료')
+                return
 
-    log.info(f'[{addr}] 브릿지 시작 client ↔ Chromium')
-    t1 = threading.Thread(target=_bridge, args=(client_sock, cr_sock), daemon=True)
-    t2 = threading.Thread(target=_bridge, args=(cr_sock, client_sock), daemon=True)
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
-    log.info(f'[{addr}] 브릿지 종료')
+            method = msg.get('method', '')
+            msg_id = msg.get('id')
+
+            # --- initialize: 데몬이 직접 응답 ---
+            if method == 'initialize':
+                log.info(f'[{addr}] initialize 요청 — 데몬이 직접 응답')
+                resp = {
+                    'jsonrpc': '2.0', 'id': msg_id,
+                    'result': {
+                        'protocolVersion': '2024-11-05',
+                        'capabilities': {'tools': {}},
+                        'serverInfo': {'name': 'chromium-mcp', 'version': '1.0'}
+                    }
+                }
+                if not _send_message(client_sock, resp):
+                    return
+                continue
+
+            # --- notifications: 데몬이 흡수 ---
+            if method.startswith('notifications/'):
+                log.info(f'[{addr}] {method} — 흡수')
+                continue
+
+            # --- tools/list: 캐시로 응답 ---
+            if method == 'tools/list':
+                tools = _load_tools_cache()
+                if tools is not None:
+                    log.info(f'[{addr}] tools/list — 캐시 응답 ({len(tools)}개 도구)')
+                    resp = {
+                        'jsonrpc': '2.0', 'id': msg_id,
+                        'result': {'tools': tools}
+                    }
+                    if not _send_message(client_sock, resp):
+                        return
+                    continue
+                else:
+                    log.info(f'[{addr}] tools/list — 캐시 없음, Chromium 시작 필요')
+                    # 캐시가 없으면 Chromium을 시작해서 도구 목록을 가져온다
+                    # (아래 Chromium 시작 로직으로 fall through)
+
+            # --- 그 외 (tools/call 등): Chromium 시작 ---
+            if not chromium_initialized:
+                log.info(f'[{addr}] {method} — Chromium 시작')
+                if not manager.wait_ready(timeout=30):
+                    log.error(f'[{addr}] Chromium 준비 실패, 연결 끊기')
+                    return
+
+                cr_sock = _connect_chromium_with_retry()
+                if cr_sock is None:
+                    log.error(f'[{addr}] Chromium 소켓 연결 실패, 연결 끊기')
+                    return
+
+                # Chromium과 핸드셰이크 (initialize + tools/list)
+                tools = _do_chromium_handshake(cr_sock)
+                if tools is None:
+                    log.error(f'[{addr}] Chromium 핸드셰이크 실패, 연결 끊기')
+                    cr_sock.close()
+                    return
+
+                chromium_initialized = True
+                log.info(f'[{addr}] Chromium 핸드셰이크 완료 ({len(tools)}개 도구)')
+
+                # tools/list 요청이 fall through로 왔으면 여기서 응답
+                if method == 'tools/list':
+                    resp = {
+                        'jsonrpc': '2.0', 'id': msg_id,
+                        'result': {'tools': tools}
+                    }
+                    if not _send_message(client_sock, resp):
+                        return
+                    continue
+
+            # Chromium에 메시지 전달 후 브릿지 모드 전환
+            log.info(f'[{addr}] {method} → Chromium 전달, 브릿지 모드 전환')
+            if not _send_message(cr_sock, msg):
+                log.error(f'[{addr}] Chromium 전달 실패')
+                return
+
+            # 남은 버퍼도 Chromium에 전달
+            if buf:
+                try:
+                    cr_sock.sendall(bytes(buf))
+                except Exception:
+                    return
+                buf.clear()
+
+            # 브릿지 모드: 이후 모든 데이터를 양방향 중계
+            log.info(f'[{addr}] 브릿지 시작 client ↔ Chromium')
+            t1 = threading.Thread(target=_bridge, args=(client_sock, cr_sock), daemon=True)
+            t2 = threading.Thread(target=_bridge, args=(cr_sock, client_sock), daemon=True)
+            t1.start()
+            t2.start()
+            t1.join()
+            t2.join()
+            log.info(f'[{addr}] 브릿지 종료')
+            return
+
+    except Exception as e:
+        log.warning(f'[{addr}] 핸들러 예외: {e}')
+    finally:
+        try: client_sock.close()
+        except Exception: pass
+        if cr_sock:
+            try: cr_sock.close()
+            except Exception: pass
 
 
 # ---------------------------------------------------------------------------
@@ -402,9 +612,6 @@ def main() -> None:
     os.chmod(PROXY_SOCKET, 0o600)
     server.listen(20)
     log.info(f'프록시 소켓 대기: {PROXY_SOCKET}')
-
-    # 시작 시 Chromium 사전 워밍 (백그라운드)
-    threading.Thread(target=manager.wait_ready, kwargs={'timeout': SOCKET_WAIT}, daemon=True).start()
 
     try:
         while _running:

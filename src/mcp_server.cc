@@ -599,9 +599,19 @@ void McpServer::HandleToolsCall(int client_id, const base::Value* id,
 
   LOG(INFO) << "[MCP] 도구 실행: " << *tool_name;
 
-  // 클라이언트에 배정된 세션 확인, 없으면 자동 배정 시도
+  // 클라이언트에 배정된 세션 확인
   McpSession* client_session = GetSessionForClient(client_id);
-  if (!client_session) {
+
+  // 세션이 필요한 도구인데 세션이 없으면 자동 배정 시도
+  bool tool_requires_session = true;
+  if (tool_registry_) {
+    McpTool* tool = tool_registry_->GetTool(*tool_name);
+    if (tool) {
+      tool_requires_session = tool->requires_session();
+    }
+  }
+
+  if (!client_session && tool_requires_session) {
     LOG(INFO) << "[MCP] client_id=" << client_id
               << " 세션 없음. 자동 배정 시도...";
     Browser* browser = chrome::FindLastActive();
