@@ -230,6 +230,19 @@ case "$(uname -s)" in
     ;;
 esac
 
+# ─── macOS Google API 키 주입 ─────────────────────────────────────────────────
+GOOGLE_API_ENV="${HOME}/.chromium-mcp/google-api.env"
+if [[ "$(uname -s)" == "Darwin" ]] && [[ -d "${CHROME_APP}" ]] && [[ -f "${GOOGLE_API_ENV}" ]]; then
+  PLIST="${CHROME_APP}/Contents/Info.plist"
+  info "Google API 키를 Info.plist에 주입 중..."
+  while IFS='=' read -r key value; do
+    [[ -z "$key" || "$key" == \#* ]] && continue
+    /usr/libexec/PlistBuddy -c "Add :LSEnvironment:${key} string ${value}" "$PLIST" 2>/dev/null \
+      || /usr/libexec/PlistBuddy -c "Set :LSEnvironment:${key} ${value}" "$PLIST" 2>/dev/null
+  done < "${GOOGLE_API_ENV}"
+  success "Google API 키 주입 완료"
+fi
+
 # ─── macOS 코드 서명 ─────────────────────────────────────────────────────────
 if [[ "$(uname -s)" == "Darwin" ]] && [[ -d "${CHROME_APP}" ]]; then
   CODESIGN_IDENTITY="${CHROMIUM_CODESIGN_IDENTITY:-Chromium Dev}"
