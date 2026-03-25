@@ -13,7 +13,6 @@
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_session.h"
@@ -90,11 +89,6 @@ McpServer::Config::~Config() = default;
 
 McpServer::ClientState::ClientState() = default;
 McpServer::ClientState::~ClientState() = default;
-
-McpToolDefinition::McpToolDefinition() = default;
-McpToolDefinition::~McpToolDefinition() = default;
-McpToolDefinition::McpToolDefinition(McpToolDefinition&&) = default;
-McpToolDefinition& McpToolDefinition::operator=(McpToolDefinition&&) = default;
 
 McpServer::McpServer() = default;
 McpServer::~McpServer() = default;
@@ -182,7 +176,8 @@ bool McpServer::Initialize(std::unique_ptr<Config> config,
   // 기본 내장 도구 등록 (navigate, screenshot 등)
   RegisterBuiltinTools();
 
-  LOG(INFO) << "[MCP] 서버 초기화 완료. " << tools_.size() << "개 도구 등록됨";
+  size_t tool_count = tool_registry_ ? tool_registry_->GetToolCount() : 0;
+  LOG(INFO) << "[MCP] 서버 초기화 완료. " << tool_count << "개 도구 등록됨";
   return true;
 }
 
@@ -294,12 +289,7 @@ void McpServer::DetachFromWebContents(content::WebContents* web_contents) {
 McpSession* McpServer::GetActiveSession() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  // 인라인 도구 실행 중이면 현재 클라이언트의 세션 반환
-  if (current_inline_client_id_ >= 0) {
-    return GetSessionForClient(current_inline_client_id_);
-  }
-
-  // 폴백: 첫 번째 배정된 클라이언트의 탭 반환
+  // 첫 번째 배정된 클라이언트의 탭 반환
   for (const auto& [id, state] : client_states_) {
     if (state.assigned_tab) {
       auto it = sessions_.find(state.assigned_tab);
@@ -536,19 +526,8 @@ void McpServer::HandleToolsList(int client_id, const base::Value* id) {
     return;
   }
 
-  // 등록된 모든 도구의 명세를 배열로 직렬화
+  // tool_registry_->BuildToolListResponse() 단일 경로
   base::ListValue tools_array;
-
-  // 1. 인라인 등록 도구
-  for (const auto& [name, tool_def] : tools_) {
-    base::DictValue tool_entry;
-    tool_entry.Set("name", tool_def.name);
-    tool_entry.Set("description", tool_def.description);
-    tool_entry.Set("inputSchema", tool_def.input_schema.Clone());
-    tools_array.Append(std::move(tool_entry));
-  }
-
-  // 2. McpToolRegistry 기반 도구
   if (tool_registry_) {
     base::Value registry_list = tool_registry_->BuildToolListResponse();
     if (registry_list.is_list()) {
@@ -561,7 +540,7 @@ void McpServer::HandleToolsList(int client_id, const base::Value* id) {
   base::DictValue result;
   result.Set("tools", std::move(tools_array));
 
-  size_t total = tools_.size() + (tool_registry_ ? tool_registry_->GetToolCount() : 0);
+  size_t total = tool_registry_ ? tool_registry_->GetToolCount() : 0;
   LOG(INFO) << "[MCP] tools/list 응답: " << total << "개 도구 (client_id="
             << client_id << ")";
   SendResult(client_id, id, base::Value(std::move(result)));
@@ -653,19 +632,7 @@ void McpServer::HandleToolsCall(int client_id, const base::Value* id,
       },
       weak_factory_.GetWeakPtr(), client_id, std::move(id_copy));
 
-  // 1. 인라인 등록 도구에서 검색
-  auto it = tools_.find(*tool_name);
-  if (it != tools_.end()) {
-    LOG(INFO) << "[MCP] 인라인 도구 실행 시작: " << *tool_name;
-    // 인라인 도구가 GetActiveSession() 호출 시 이 클라이언트의 세션 반환
-    current_inline_client_id_ = client_id;
-    it->second.handler.Run(tool_args, std::move(result_callback));
-    current_inline_client_id_ = -1;
-    LOG(INFO) << "[MCP] 인라인 도구 핸들러 반환됨: " << *tool_name;
-    return;
-  }
-
-  // 2. McpToolRegistry 기반 도구에서 검색
+  // tool_registry_ 단일 경로
   if (tool_registry_) {
     // tabs new/select 완료 후 호출 클라이언트의 assigned_tab 갱신
     const std::string* action = tool_args.FindString("action");
@@ -777,29 +744,16 @@ void McpServer::SendMessage(int client_id, base::DictValue message) {
 // 도구 등록
 // -----------------------------------------------------------------------
 
-void McpServer::RegisterTool(McpToolDefinition tool_def) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  const std::string name = tool_def.name;
-
-  if (tools_.count(name)) {
-    LOG(WARNING) << "[MCP] 도구 이름 중복 등록 시도: " << name;
-    return;
-  }
-
-  tools_[name] = std::move(tool_def);
-  LOG(INFO) << "[MCP] 도구 등록: " << name;
-}
-
 void McpServer::RegisterBuiltinTools() {
-  // ===== 레거시 인라인 도구 (browser_info — Task 10에서 처리 예정) =====
-  RegisterBrowserInfoTool();
-
-  // ===== McpTool 인터페이스 기반 도구 레지스트리 =====
+  // 모든 도구는 tool_registry_ (McpTool 인터페이스 기반)로 등록된다.
   if (!tool_registry_) {
     tool_registry_ = std::make_unique<McpToolRegistry>();
   }
 
-  // Phase 1 마이그레이션: 7개 레거시 도구 클래스 전환
+  // 브라우저 정보 (BrowserInfoTool — requires_session=false)
+  tool_registry_->RegisterTool(std::make_unique<BrowserInfoTool>());
+
+  // 페이지 제어
   tool_registry_->RegisterTool(std::make_unique<NavigateTool>());
   tool_registry_->RegisterTool(std::make_unique<ScreenshotTool>());
   tool_registry_->RegisterTool(std::make_unique<PageContentTool>());
@@ -811,7 +765,6 @@ void McpServer::RegisterBuiltinTools() {
     tool_registry_->RegisterTool(
         std::make_unique<NetworkRequestsTool>(capture_tool_ptr));
   }
-  // TabsTool: 아래 브라우저 유틸 블록에서 이미 등록됨
 
   // 입력 도구
   tool_registry_->RegisterTool(std::make_unique<ClickTool>());
@@ -856,68 +809,6 @@ void McpServer::RegisterBuiltinTools() {
   // 브라우저 데이터
   tool_registry_->RegisterTool(std::make_unique<HistoryTool>());
   tool_registry_->RegisterTool(std::make_unique<BookmarkTool>());
-}
-
-void McpServer::RegisterBrowserInfoTool() {
-  base::DictValue schema;
-  schema.Set("type", "object");
-  schema.Set("properties", base::DictValue());
-
-  McpToolDefinition def;
-  def.name = "browser_info";
-  def.description = "브라우저 버전, 활성 탭 URL, 탭 개수 등 브라우저 정보 반환";
-  def.input_schema = std::move(schema);
-  def.handler = base::BindRepeating(&McpServer::ExecuteBrowserInfo,
-                                     weak_factory_.GetWeakPtr());
-  RegisterTool(std::move(def));
-}
-
-// -----------------------------------------------------------------------
-// 도구 실행 핸들러 구현
-// navigate, screenshot, page_content, evaluate, network_capture,
-// network_requests, tabs, click, fill 은 tool_registry_ 클래스 기반으로 처리됨.
-// -----------------------------------------------------------------------
-
-void McpServer::ExecuteBrowserInfo(
-    const base::DictValue& params,
-    base::OnceCallback<void(base::Value)> callback) {
-  LOG(INFO) << "[MCP] ExecuteBrowserInfo 시작";
-
-  base::DictValue info;
-
-  // 브라우저 버전 정보
-  info.Set("browserName", "Chromium-MCP");
-  info.Set("browserVersion", "130.0.0");
-
-  // 활성 탭 정보 안전하게 조회
-  Browser* browser = chrome::FindLastActive();
-  if (browser && browser->tab_strip_model()) {
-    content::WebContents* wc =
-        browser->tab_strip_model()->GetActiveWebContents();
-    if (wc) {
-      info.Set("activeTabUrl", wc->GetVisibleURL().spec());
-      info.Set("activeTabTitle", base::UTF16ToUTF8(wc->GetTitle()));
-    }
-  }
-
-  // 탭/브라우저 수
-  int browser_count = static_cast<int>(chrome::GetTotalBrowserCount());
-  int page_count = 0;
-  if (browser) {
-    page_count = browser->tab_strip_model()
-                     ? browser->tab_strip_model()->count()
-                     : 0;
-  }
-  info.Set("tabCount", page_count);
-  info.Set("browserCount", browser_count);
-  info.Set("mcpServerName", kMcpServerName);
-  info.Set("mcpProtocolVersion", kMcpProtocolVersion);
-
-  std::string json_output;
-  base::JSONWriter::Write(base::Value(info.Clone()), &json_output);
-
-  LOG(INFO) << "[MCP] ExecuteBrowserInfo 완료: " << json_output;
-  std::move(callback).Run(MakeTextResult(json_output));
 }
 
 // -----------------------------------------------------------------------

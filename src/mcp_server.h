@@ -31,25 +31,6 @@ class McpSession;
 class McpToolRegistry;
 class McpTransport;
 
-// MCP 도구 핸들러 타입 정의.
-// tools/call 요청 시 라우팅되어 호출되는 콜백.
-// params: 도구 인자 (JSON 객체), callback: 결과 반환 콜백
-using McpToolHandler =
-    base::RepeatingCallback<void(const base::DictValue& params,
-                                 base::OnceCallback<void(base::Value)> callback)>;
-
-// MCP 도구 명세 구조체. tools/list 응답에 사용됨.
-struct McpToolDefinition {
-  McpToolDefinition();
-  ~McpToolDefinition();
-  McpToolDefinition(McpToolDefinition&&);
-  McpToolDefinition& operator=(McpToolDefinition&&);
-  std::string name;         // 도구 이름 (예: "navigate", "screenshot")
-  std::string description;  // 도구 설명 (AI가 이해하는 자연어)
-  base::DictValue input_schema;  // JSON Schema 형식의 입력 파라미터 정의
-  McpToolHandler handler;   // 실제 실행 핸들러
-};
-
 // MCP 서버 전송 방식
 enum class McpTransportMode {
   kStdio,   // stdin/stdout으로 JSON-RPC 통신
@@ -157,13 +138,6 @@ class McpServer {
   // JSON 파싱 후 HandleMessage()로 라우팅.
   void OnMessageReceived(int client_id, const std::string& json_message);
 
-  // -----------------------------------------------------------------------
-  // 도구 등록
-  // -----------------------------------------------------------------------
-
-  // MCP 도구를 서버에 등록. Initialize() 이후 도구 추가 가능.
-  void RegisterTool(McpToolDefinition tool_def);
-
  private:
   // -----------------------------------------------------------------------
   // JSON-RPC 메시지 처리 내부 로직
@@ -214,20 +188,8 @@ class McpServer {
   // -----------------------------------------------------------------------
 
   // 기본 제공 MCP 도구들을 모두 등록.
-  // navigate, screenshot, page_content, evaluate, network_*, click, fill 은 tool_registry_ 클래스 기반.
-  // browser_info 는 레거시 인라인 유지 (Task 10에서 처리 예정).
+  // 모든 도구는 tool_registry_ (McpTool 인터페이스 기반)로 등록된다.
   void RegisterBuiltinTools();
-
-  // 레거시 인라인 도구 등록 메서드 (browser_info만 유지)
-  void RegisterBrowserInfoTool();
-
-  // -----------------------------------------------------------------------
-  // 도구 실행 핸들러 (내부 CDP 호출) — 레거시 유지분
-  // -----------------------------------------------------------------------
-
-  // browser_info 도구: 브라우저 버전, 활성 탭 정보 반환
-  void ExecuteBrowserInfo(const base::DictValue& params,
-                          base::OnceCallback<void(base::Value)> callback);
 
   // -----------------------------------------------------------------------
   // MCP 응답 포맷 헬퍼
@@ -284,14 +246,7 @@ class McpServer {
   std::unordered_map<content::WebContents*, std::unique_ptr<McpSession>>
       sessions_;
 
-  // 인라인 도구 실행 중 현재 클라이언트 ID (-1이면 미설정)
-  // GetActiveSession()에서 이 값으로 GetSessionForClient() 호출
-  int current_inline_client_id_ = -1;
-
-  // 등록된 MCP 도구 목록 (name → definition) — 레거시 인라인 핸들러용
-  std::unordered_map<std::string, McpToolDefinition> tools_;
-
-  // McpTool 인터페이스 기반 도구 레지스트리 — 도구 클래스 기반 등록용
+  // McpTool 인터페이스 기반 도구 레지스트리
   std::unique_ptr<McpToolRegistry> tool_registry_;
 
   // UI 스레드 시퀀스 검사 (BrowserThread::UI 전용)
