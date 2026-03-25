@@ -28,7 +28,7 @@
 #include "chrome/browser/mcp/tools/coverage_tool.h"
 #include "chrome/browser/mcp/tools/dialog_tool.h"
 #include "chrome/browser/mcp/tools/click_tool.h"
-#include "chrome/browser/mcp/tools/dom_tool.h"
+#include "chrome/browser/mcp/tools/fill_tool.h"
 #include "chrome/browser/mcp/tools/download_tool.h"
 #include "chrome/browser/mcp/tools/drag_tool.h"
 #include "chrome/browser/mcp/tools/element_tool.h"
@@ -791,8 +791,7 @@ void McpServer::RegisterTool(McpToolDefinition tool_def) {
 }
 
 void McpServer::RegisterBuiltinTools() {
-  // ===== 레거시 인라인 도구 (fill/browser_info — Task 6,10에서 처리 예정) =====
-  RegisterFillTool();
+  // ===== 레거시 인라인 도구 (browser_info — Task 10에서 처리 예정) =====
   RegisterBrowserInfoTool();
 
   // ===== McpTool 인터페이스 기반 도구 레지스트리 =====
@@ -816,6 +815,7 @@ void McpServer::RegisterBuiltinTools() {
 
   // 입력 도구
   tool_registry_->RegisterTool(std::make_unique<ClickTool>());
+  tool_registry_->RegisterTool(std::make_unique<FillTool>());
   tool_registry_->RegisterTool(std::make_unique<KeyboardTool>());
   tool_registry_->RegisterTool(std::make_unique<MouseTool>());
   tool_registry_->RegisterTool(std::make_unique<ScrollTool>());
@@ -858,38 +858,6 @@ void McpServer::RegisterBuiltinTools() {
   tool_registry_->RegisterTool(std::make_unique<BookmarkTool>());
 }
 
-void McpServer::RegisterFillTool() {
-  base::DictValue schema;
-  schema.Set("type", "object");
-
-  base::DictValue properties;
-  {
-    base::DictValue sel_prop;
-    sel_prop.Set("type", "string");
-    sel_prop.Set("description", "입력 필드의 CSS 선택자");
-    properties.Set("selector", std::move(sel_prop));
-
-    base::DictValue val_prop;
-    val_prop.Set("type", "string");
-    val_prop.Set("description", "입력할 값");
-    properties.Set("value", std::move(val_prop));
-  }
-  schema.Set("properties", std::move(properties));
-
-  base::ListValue required;
-  required.Append("selector");
-  required.Append("value");
-  schema.Set("required", std::move(required));
-
-  McpToolDefinition def;
-  def.name = "fill";
-  def.description = "CSS 선택자로 지정한 입력 필드에 값 입력";
-  def.input_schema = std::move(schema);
-  def.handler = base::BindRepeating(&McpServer::ExecuteFill,
-                                     weak_factory_.GetWeakPtr());
-  RegisterTool(std::move(def));
-}
-
 void McpServer::RegisterBrowserInfoTool() {
   base::DictValue schema;
   schema.Set("type", "object");
@@ -907,63 +875,8 @@ void McpServer::RegisterBrowserInfoTool() {
 // -----------------------------------------------------------------------
 // 도구 실행 핸들러 구현
 // navigate, screenshot, page_content, evaluate, network_capture,
-// network_requests, tabs, click 은 tool_registry_ 클래스 기반으로 처리됨.
+// network_requests, tabs, click, fill 은 tool_registry_ 클래스 기반으로 처리됨.
 // -----------------------------------------------------------------------
-
-void McpServer::ExecuteFill(const base::DictValue& params,
-                             base::OnceCallback<void(base::Value)> callback) {
-  McpSession* session = GetActiveSession();
-  if (!session) {
-    std::move(callback).Run(MakeErrorResult("활성 탭 세션이 없습니다."));
-    return;
-  }
-
-  const std::string* selector = params.FindString("selector");
-  const std::string* value = params.FindString("value");
-  if (!selector || !value) {
-    std::move(callback).Run(MakeErrorResult("selector와 value가 필요합니다."));
-    return;
-  }
-
-  // JavaScript로 입력 필드 값 설정.
-  // React/Vue 등 프레임워크 호환을 위해 input 이벤트도 발생시킴.
-  const std::string& sel = *selector;
-  const std::string& val = *value;
-  std::string js =
-      "(() => {"
-      "  const el = document.querySelector('" + sel + "');"
-      "  if (!el) return 'not_found';"
-      "  const nativeInputValueSetter = "
-      "    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;"
-      "  if (nativeInputValueSetter) {"
-      "    nativeInputValueSetter.call(el, '" + val + "');"
-      "  } else {"
-      "    el.value = '" + val + "';"
-      "  }"
-      "  el.dispatchEvent(new Event('input', {bubbles: true}));"
-      "  el.dispatchEvent(new Event('change', {bubbles: true}));"
-      "  return 'ok';"
-      "})()";
-
-  base::DictValue cdp_params;
-  cdp_params.Set("expression", js);
-  cdp_params.Set("returnByValue", true);
-
-  session->SendCdpCommand(
-      "Runtime.evaluate",
-      std::move(cdp_params),
-      base::BindOnce(
-          [](base::OnceCallback<void(base::Value)> cb,
-             std::optional<base::DictValue> result,
-             const std::string& error) {
-            if (!error.empty()) {
-              std::move(cb).Run(MakeErrorResult("입력 실패: " + error));
-              return;
-            }
-            std::move(cb).Run(MakeTextResult("값 입력 완료"));
-          },
-          std::move(callback)));
-}
 
 void McpServer::ExecuteBrowserInfo(
     const base::DictValue& params,

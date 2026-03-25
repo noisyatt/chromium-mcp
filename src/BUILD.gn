@@ -38,8 +38,8 @@ source_set("mcp") {
     # ========== DOM/입력 도구 ==========
     "tools/click_tool.cc",
     "tools/click_tool.h",
-    "tools/dom_tool.cc",
-    "tools/dom_tool.h",
+    "tools/fill_tool.cc",
+    "tools/fill_tool.h",
     "tools/javascript_tool.cc",
     "tools/javascript_tool.h",
     "tools/keyboard_tool.cc",
