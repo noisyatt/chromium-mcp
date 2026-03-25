@@ -11,64 +11,9 @@
 #include "base/logging.h"
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_session.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 
 namespace mcp {
-
-namespace {
-
-// MCP 성공 응답 Value 생성
-base::Value MakeSuccessResult(const std::string& message) {
-  base::DictValue result;
-  base::ListValue content;
-  base::DictValue item;
-  item.Set("type", "text");
-  item.Set("text", message);
-  content.Append(std::move(item));
-  result.Set("content", std::move(content));
-  result.Set("isError", false);
-  return base::Value(std::move(result));
-}
-
-// MCP 에러 응답 Value 생성
-base::Value MakeErrorResult(const std::string& message) {
-  base::DictValue result;
-  base::ListValue content;
-  base::DictValue item;
-  item.Set("type", "text");
-  item.Set("text", message);
-  content.Append(std::move(item));
-  result.Set("content", std::move(content));
-  result.Set("isError", true);
-  return base::Value(std::move(result));
-}
-
-// CDP 응답에 "error" 키가 있는지 확인
-bool HasCdpError(const base::Value& response) {
-  const base::DictValue* dict = response.GetIfDict();
-  if (!dict) {
-    return true;
-  }
-  return dict->Find("error") != nullptr;
-}
-
-// CDP 응답에서 에러 메시지 추출
-std::string ExtractCdpErrorMessage(const base::Value& response) {
-  const base::DictValue* dict = response.GetIfDict();
-  if (!dict) {
-    return "CDP 응답이 Dict 형식이 아님";
-  }
-  const base::DictValue* error = dict->FindDict("error");
-  if (!error) {
-    return "알 수 없는 CDP 에러";
-  }
-  const std::string* msg = error->FindString("message");
-  if (!msg) {
-    return "에러 메시지 없음";
-  }
-  return *msg;
-}
-
-}  // namespace
 
 // ============================================================
 // FillTool 구현
@@ -135,7 +80,7 @@ base::DictValue FillTool::input_schema() const {
 
   // ref: backendNodeId 참조
   base::DictValue ref_prop;
-  ref_prop.Set("type", "string");
+  ref_prop.Set("type", "integer");
   ref_prop.Set("description",
                "접근성 스냅샷 또는 element 도구에서 얻은 요소 ref (backendNodeId).");
   properties.Set("ref", std::move(ref_prop));
@@ -360,19 +305,5 @@ void FillTool::OnInsertText(base::OnceCallback<void(base::Value)> callback,
   std::move(callback).Run(MakeSuccessResult("텍스트 입력이 성공적으로 완료되었습니다."));
 }
 
-// 정적 헬퍼: CDP 에러 처리
-// NOLINTNEXTLINE(runtime/references)
-bool FillTool::HandleCdpError(
-    const base::Value& response,
-    const std::string& step_name,
-    base::OnceCallback<void(base::Value)>& callback) {
-  if (!HasCdpError(response)) {
-    return false;
-  }
-  std::string error_msg = ExtractCdpErrorMessage(response);
-  LOG(ERROR) << "[FillTool] CDP 에러 (" << step_name << "): " << error_msg;
-  std::move(callback).Run(MakeErrorResult(step_name + " 실패: " + error_msg));
-  return true;
-}
 
 }  // namespace mcp

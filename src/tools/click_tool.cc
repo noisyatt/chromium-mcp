@@ -13,62 +13,11 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_session.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 
 namespace mcp {
 
 namespace {
-
-// MCP 성공 응답 Value 생성
-base::Value MakeSuccessResult(const std::string& message) {
-  base::DictValue result;
-  base::ListValue content;
-  base::DictValue item;
-  item.Set("type", "text");
-  item.Set("text", message);
-  content.Append(std::move(item));
-  result.Set("content", std::move(content));
-  result.Set("isError", false);
-  return base::Value(std::move(result));
-}
-
-// MCP 에러 응답 Value 생성
-base::Value MakeErrorResult(const std::string& message) {
-  base::DictValue result;
-  base::ListValue content;
-  base::DictValue item;
-  item.Set("type", "text");
-  item.Set("text", message);
-  content.Append(std::move(item));
-  result.Set("content", std::move(content));
-  result.Set("isError", true);
-  return base::Value(std::move(result));
-}
-
-// CDP 응답에 "error" 키가 있는지 확인
-bool HasCdpError(const base::Value& response) {
-  const base::DictValue* dict = response.GetIfDict();
-  if (!dict) {
-    return true;
-  }
-  return dict->Find("error") != nullptr;
-}
-
-// CDP 응답에서 에러 메시지 추출
-std::string ExtractCdpErrorMessage(const base::Value& response) {
-  const base::DictValue* dict = response.GetIfDict();
-  if (!dict) {
-    return "CDP 응답이 Dict 형식이 아님";
-  }
-  const base::DictValue* error = dict->FindDict("error");
-  if (!error) {
-    return "알 수 없는 CDP 에러";
-  }
-  const std::string* msg = error->FindString("message");
-  if (!msg) {
-    return "에러 메시지 없음";
-  }
-  return *msg;
-}
 
 // Input.dispatchMouseEvent 파라미터 Dict 생성
 base::DictValue MakeMouseEventParams(const std::string& type,
@@ -167,7 +116,7 @@ base::DictValue ClickTool::input_schema() const {
 
   // ref: backendNodeId 참조
   base::DictValue ref_prop;
-  ref_prop.Set("type", "string");
+  ref_prop.Set("type", "integer");
   ref_prop.Set("description",
                "접근성 스냅샷 또는 element 도구에서 얻은 요소 ref (backendNodeId).");
   properties.Set("ref", std::move(ref_prop));
@@ -334,23 +283,27 @@ void ClickTool::WaitForLoad(McpSession* session,
       std::make_shared<base::OnceCallback<void(base::Value)>>(
           std::move(callback));
 
+  // per-request 타이머: 멤버 변수 대신 shared_ptr로 생성하여 동시 호출 충돌 방지
+  auto timer = std::make_shared<base::OneShotTimer>();
+
   // Page.loadEventFired 이벤트 핸들러 등록
   session->RegisterCdpEventHandler(
       kLoadEventKey,
       base::BindRepeating(&ClickTool::OnLoadEventFired,
                           weak_factory_.GetWeakPtr(), session,
-                          shared_callback));
+                          shared_callback, timer));
 
   // 5초 타임아웃 타이머 설정
-  load_timeout_timer_.Start(
+  timer->Start(
       FROM_HERE, base::Milliseconds(kLoadTimeoutMs),
       base::BindOnce(&ClickTool::OnLoadTimeout, weak_factory_.GetWeakPtr(),
-                     session, shared_callback));
+                     session, shared_callback, timer));
 }
 
 void ClickTool::OnLoadEventFired(
     McpSession* session,
     std::shared_ptr<base::OnceCallback<void(base::Value)>> shared_callback,
+    std::shared_ptr<base::OneShotTimer> timer,
     const std::string& event_name,
     const base::DictValue& params) {
   // shared_callback이 이미 소비된 경우(타임아웃이 먼저 발생) 무시
@@ -358,8 +311,8 @@ void ClickTool::OnLoadEventFired(
     return;
   }
 
-  // 타임아웃 타이머 취소
-  load_timeout_timer_.Stop();
+  // per-request 타임아웃 타이머 취소
+  timer->Stop();
   // 이벤트 핸들러 해제
   session->UnregisterCdpEventHandler(kLoadEventKey);
 
@@ -370,7 +323,8 @@ void ClickTool::OnLoadEventFired(
 
 void ClickTool::OnLoadTimeout(
     McpSession* session,
-    std::shared_ptr<base::OnceCallback<void(base::Value)>> shared_callback) {
+    std::shared_ptr<base::OnceCallback<void(base::Value)>> shared_callback,
+    std::shared_ptr<base::OneShotTimer> timer) {
   // shared_callback이 이미 소비된 경우(이벤트가 먼저 발생) 무시
   if (!shared_callback || !*shared_callback) {
     return;
@@ -386,19 +340,5 @@ void ClickTool::OnLoadTimeout(
                              "탐색이 발생하지 않았을 수 있습니다)."));
 }
 
-// 정적 헬퍼: CDP 에러 처리
-// NOLINTNEXTLINE(runtime/references)
-bool ClickTool::HandleCdpError(
-    const base::Value& response,
-    const std::string& step_name,
-    base::OnceCallback<void(base::Value)>& callback) {
-  if (!HasCdpError(response)) {
-    return false;
-  }
-  std::string error_msg = ExtractCdpErrorMessage(response);
-  LOG(ERROR) << "[ClickTool] CDP 에러 (" << step_name << "): " << error_msg;
-  std::move(callback).Run(MakeErrorResult(step_name + " 실패: " + error_msg));
-  return true;
-}
 
 }  // namespace mcp

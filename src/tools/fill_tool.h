@@ -11,6 +11,7 @@
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_tool_registry.h"
 #include "chrome/browser/mcp/tools/actionability_checker.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 #include "chrome/browser/mcp/tools/element_locator.h"
 
 namespace mcp {
@@ -94,11 +95,6 @@ class FillTool : public McpTool {
   // Input.insertText 완료 → 성공 결과 반환
   void OnInsertText(base::OnceCallback<void(base::Value)> callback,
                     base::Value response);
-
-  // CDP 에러 처리 헬퍼
-  static bool HandleCdpError(const base::Value& response,
-                              const std::string& step_name,
-                              base::OnceCallback<void(base::Value)>& callback);
 
   // ActionabilityChecker 인스턴스 (per-Execute, stateless)
   ActionabilityChecker actionability_checker_;

@@ -13,6 +13,7 @@
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_tool_registry.h"
 #include "chrome/browser/mcp/tools/actionability_checker.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 #include "chrome/browser/mcp/tools/element_locator.h"
 
 namespace mcp {
@@ -79,24 +80,18 @@ class ClickTool : public McpTool {
   void OnLoadEventFired(
       McpSession* session,
       std::shared_ptr<base::OnceCallback<void(base::Value)>> shared_callback,
+      std::shared_ptr<base::OneShotTimer> timer,
       const std::string& event_name,
       const base::DictValue& params);
 
-  // waitForNavigation 타임아웃 (5초)
+  // waitForNavigation 타임아웃 (5초) — per-request 타이머 수신
   void OnLoadTimeout(
       McpSession* session,
-      std::shared_ptr<base::OnceCallback<void(base::Value)>> shared_callback);
-
-  // CDP 에러 처리 헬퍼
-  static bool HandleCdpError(const base::Value& response,
-                              const std::string& step_name,
-                              base::OnceCallback<void(base::Value)>& callback);
+      std::shared_ptr<base::OnceCallback<void(base::Value)>> shared_callback,
+      std::shared_ptr<base::OneShotTimer> timer);
 
   // ActionabilityChecker 인스턴스 (per-Execute, stateless)
   ActionabilityChecker actionability_checker_;
-
-  // waitForNavigation 타임아웃 타이머
-  base::OneShotTimer load_timeout_timer_;
 
   base::WeakPtrFactory<ClickTool> weak_factory_{this};
 };
