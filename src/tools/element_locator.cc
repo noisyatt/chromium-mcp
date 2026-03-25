@@ -267,7 +267,7 @@ void ElementLocator::LocateByRef(McpSession* session,
 }
 
 // ============================================================
-// OnQueryAXTreeResponse: AX 트리 조회 결과에서 첫 노드 선택
+// OnQueryAXTreeResponse: AX 트리 조회 결과에서 visible 우선으로 노드 선택
 // ============================================================
 
 void ElementLocator::OnQueryAXTreeResponse(McpSession* session,
@@ -304,7 +304,7 @@ void ElementLocator::OnQueryAXTreeResponse(McpSession* session,
     return;
   }
 
-  // 첫 번째 노드에서 backendDOMNodeId, role, name 추출
+  // 첫 번째 노드에서 fallback용 backendDOMNodeId, role, name 추출
   const base::Value& first_node_val = (*nodes)[0];
   const base::DictValue* first_node = first_node_val.GetIfDict();
   if (!first_node) {
@@ -312,40 +312,128 @@ void ElementLocator::OnQueryAXTreeResponse(McpSession* session,
     return;
   }
 
-  std::optional<int> backend_node_id =
-      first_node->FindInt("backendDOMNodeId");
-  if (!backend_node_id.has_value() || *backend_node_id <= 0) {
+  std::optional<int> fallback_id = first_node->FindInt("backendDOMNodeId");
+  if (!fallback_id.has_value() || *fallback_id <= 0) {
     std::move(callback).Run(
         std::nullopt, "AX 노드에 backendDOMNodeId가 없습니다");
     return;
   }
 
-  // role 추출: {type, value} 구조
-  std::string result_role;
-  const base::DictValue* role_obj = first_node->FindDict("role");
-  if (role_obj) {
-    const std::string* role_val = role_obj->FindString("value");
-    if (role_val) {
-      result_role = *role_val;
+  std::string fallback_role;
+  if (const base::DictValue* role_obj = first_node->FindDict("role")) {
+    if (const std::string* v = role_obj->FindString("value")) {
+      fallback_role = *v;
+    }
+  }
+  std::string fallback_name;
+  if (const base::DictValue* name_obj = first_node->FindDict("name")) {
+    if (const std::string* v = name_obj->FindString("value")) {
+      fallback_name = *v;
     }
   }
 
-  // name 추출: {type, value} 구조
-  std::string result_name;
-  const base::DictValue* name_obj = first_node->FindDict("name");
-  if (name_obj) {
-    const std::string* name_val = name_obj->FindString("value");
-    if (name_val) {
-      result_name = *name_val;
-    }
+  LOG(INFO) << "[ElementLocator] AX 노드 " << nodes->size()
+            << "개 중 visible 우선 탐색 시작";
+
+  // nodes를 복사해 TryNextVisibleNode에 소유권 이전
+  TryNextVisibleNode(session, base::Value(nodes->Clone()), 0,
+                     *fallback_id, fallback_role, fallback_name,
+                     std::move(callback));
+}
+
+// ============================================================
+// TryNextVisibleNode: index부터 순회하며 getBoxModel 성공 노드 선택
+// ============================================================
+
+void ElementLocator::TryNextVisibleNode(McpSession* session,
+                                        base::Value nodes_storage,
+                                        size_t index,
+                                        int fallback_backend_id,
+                                        const std::string& fallback_role,
+                                        const std::string& fallback_name,
+                                        Callback callback) {
+  const base::ListValue* nodes = nodes_storage.GetIfList();
+  if (!nodes || index >= nodes->size()) {
+    // 모든 노드가 non-visible → fallback (첫 번째 노드)
+    LOG(INFO) << "[ElementLocator] 모든 노드 non-visible, fallback 사용: "
+              << "backendNodeId=" << fallback_backend_id;
+    ResolveToCoordinates(session, fallback_backend_id, fallback_role,
+                         fallback_name, std::move(callback));
+    return;
   }
 
-  LOG(INFO) << "[ElementLocator] AX 노드 선택: backendNodeId="
-            << *backend_node_id << " role=" << result_role
-            << " name=" << result_name;
-
-  ResolveToCoordinates(session, *backend_node_id, result_role, result_name,
+  const base::DictValue* node = (*nodes)[index].GetIfDict();
+  if (!node) {
+    // 형식 오류인 노드 → 다음으로
+    auto nodes_copy = nodes_storage.Clone();
+    TryNextVisibleNode(session, std::move(nodes_copy), index + 1,
+                       fallback_backend_id, fallback_role, fallback_name,
                        std::move(callback));
+    return;
+  }
+
+  std::optional<int> backend_id = node->FindInt("backendDOMNodeId");
+  if (!backend_id.has_value() || *backend_id <= 0) {
+    auto nodes_copy = nodes_storage.Clone();
+    TryNextVisibleNode(session, std::move(nodes_copy), index + 1,
+                       fallback_backend_id, fallback_role, fallback_name,
+                       std::move(callback));
+    return;
+  }
+
+  // role/name 추출
+  std::string node_role;
+  if (const base::DictValue* role_obj = node->FindDict("role")) {
+    if (const std::string* v = role_obj->FindString("value")) node_role = *v;
+  }
+  std::string node_name;
+  if (const base::DictValue* name_obj = node->FindDict("name")) {
+    if (const std::string* v = name_obj->FindString("value")) node_name = *v;
+  }
+
+  int cur_backend_id = *backend_id;
+
+  // getBoxModel로 visibility 확인
+  base::DictValue params;
+  params.Set("backendNodeId", cur_backend_id);
+
+  session->SendCdpCommand(
+      "DOM.getBoxModel", std::move(params),
+      base::BindOnce(
+          [](base::WeakPtr<ElementLocator> self,
+             McpSession* session,
+             base::Value nodes_storage,
+             size_t index,
+             int fallback_backend_id,
+             std::string fallback_role,
+             std::string fallback_name,
+             int cur_backend_id,
+             std::string cur_role,
+             std::string cur_name,
+             Callback callback,
+             base::Value box_response) {
+            if (!self) return;
+            if (HasCdpError(box_response)) {
+              // non-visible → 다음 노드 시도
+              LOG(INFO) << "[ElementLocator] backendNodeId=" << cur_backend_id
+                        << " non-visible, 다음 노드 시도 (index=" << index + 1
+                        << ")";
+              self->TryNextVisibleNode(session, std::move(nodes_storage),
+                                       index + 1, fallback_backend_id,
+                                       fallback_role, fallback_name,
+                                       std::move(callback));
+            } else {
+              // visible → 이 노드 선택
+              LOG(INFO) << "[ElementLocator] visible 노드 선택: backendNodeId="
+                        << cur_backend_id << " role=" << cur_role
+                        << " name=" << cur_name;
+              self->ResolveToCoordinates(session, cur_backend_id, cur_role,
+                                         cur_name, std::move(callback));
+            }
+          },
+          weak_factory_.GetWeakPtr(), session, std::move(nodes_storage),
+          index, fallback_backend_id, fallback_role, fallback_name,
+          cur_backend_id, node_role, node_name, std::move(callback)));
 }
 
 // ============================================================

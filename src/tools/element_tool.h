@@ -76,6 +76,11 @@ class ElementTool : public McpTool {
                  std::optional<ElementLocator::Result> result,
                  std::string error);
 
+  // AX Tree 경로(node_id==0)에서 backendNodeId → DOM.describeNode → nodeId 획득
+  void OnResolveNodeId(std::shared_ptr<QueryContext> ctx,
+                       int backend_node_id,
+                       base::Value response);
+
   // -----------------------------------------------------------------------
   // CDP 단계별 핸들러
   // -----------------------------------------------------------------------

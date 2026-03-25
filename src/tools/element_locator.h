@@ -116,10 +116,20 @@ class ElementLocator {
   // AX Tree 콜백
   // -----------------------------------------------------------------------
 
-  // Accessibility.queryAXTree 응답에서 첫 노드의 backendDOMNodeId 선택
+  // Accessibility.queryAXTree 응답에서 visible 우선으로 노드 선택
   void OnQueryAXTreeResponse(McpSession* session,
                              Callback callback,
                              base::Value response);
+
+  // nodes 배열을 index부터 순회하며 getBoxModel 성공(=visible) 노드 선택.
+  // 모두 실패 시 fallback_backend_id로 ResolveToCoordinates 호출.
+  void TryNextVisibleNode(McpSession* session,
+                          base::Value nodes_storage,
+                          size_t index,
+                          int fallback_backend_id,
+                          const std::string& fallback_role,
+                          const std::string& fallback_name,
+                          Callback callback);
 
   // exact:false 시 Accessibility.getFullAXTree 응답에서 contains 필터링
   void OnFullAXTreeResponse(McpSession* session,
