@@ -116,11 +116,11 @@ if [[ -f "${BUILD_GN}" ]]; then
   if grep -q '//chrome/browser/mcp' "${BUILD_GN}"; then
     success "  BUILD.gn: MCP 의존성 이미 존재"
   else
-    # static_library("browser") 블록의 deps 안에서 "//chrome/browser/ui" 뒤에 삽입
+    # static_library("browser") 블록의 deps 안에서 "//chrome/browser/ui" 뒤에 삽입 (첫 매칭만)
     if grep -q '"//chrome/browser/ui"' "${BUILD_GN}"; then
-      sed -i '' '/"\/\/chrome\/browser\/ui"/a\
-\    "//chrome/browser/mcp",
-' "${BUILD_GN}"
+      awk '/"\/\/chrome\/browser\/ui"/ && !done {
+        print; print "    \"//chrome/browser/mcp\","; done=1; next
+      } {print}' "${BUILD_GN}" > "${BUILD_GN}.tmp" && mv "${BUILD_GN}.tmp" "${BUILD_GN}"
       success "  BUILD.gn: MCP 의존성 추가 완료"
     else
       warn "  BUILD.gn: '//chrome/browser/ui' 패턴을 찾을 수 없습니다"
@@ -177,44 +177,74 @@ if [[ -f "${DELEGATE_CC}" ]]; then
   if grep -q 'InitializeMcpIfNeeded' "${DELEGATE_CC}"; then
     success "  chrome_main_delegate.cc: MCP 초기화 코드 이미 존재"
   else
-    # 4a. #include 추가 (파일 최상단 copyright 뒤, 첫 #include 앞)
-    sed -i '' '/#include "chrome\/app\/chrome_main_delegate.h"/i\
-#include "chrome/browser/mcp/mcp_server.h"\
+    # 4a. #include 추가 — corresponding header 뒤, C 헤더 블록에 <cstdlib>, 프로젝트 헤더에 mcp_server.h
+    # <cstdlib>은 기존 C 시스템 헤더 근처에 삽입
+    if ! grep -q '<cstdlib>' "${DELEGATE_CC}"; then
+      sed -i '' '/#include <stddef.h>/a\
 #include <cstdlib>
 ' "${DELEGATE_CC}"
+    fi
+    # mcp_server.h는 다른 chrome/browser/ 헤더 근처에 삽입
+    if ! grep -q 'mcp_server.h' "${DELEGATE_CC}"; then
+      sed -i '' '/#include "chrome\/app\/chrome_main_delegate.h"/a\
+#include "chrome/browser/mcp/mcp_server.h"
+' "${DELEGATE_CC}"
+    fi
 
-    # 4b. InitializeMcpIfNeeded() 함수 정의 — "}  // namespace" 앞에 삽입
-    # 첫 번째 매칭만 처리 (익명 namespace 닫는 부분)
-    sed -i '' '0,/^}  \/\/ namespace$/s/^}  \/\/ namespace$/\
-void InitializeMcpIfNeeded() {\
-  auto* cmd = base::CommandLine::ForCurrentProcess();\
-  bool mcp_stdio = cmd->HasSwitch("mcp-stdio");\
-  bool mcp_env = (!!getenv("CHROMIUM_MCP"));\
-  std::string socket_path = cmd->GetSwitchValueASCII("mcp-socket");\
-  bool mcp_socket = !socket_path.empty();\
-  if (!mcp_stdio \&\& !mcp_env \&\& !mcp_socket) return;\
-  cmd->RemoveSwitch("mcp-stdio");\
-  cmd->RemoveSwitch("mcp-socket");\
-  unsetenv("CHROMIUM_MCP");\
-  auto* server = mcp::McpServer::GetInstance();\
-  if (mcp_stdio || mcp_env) {\
-    server->StartWithStdio();\
-  } else {\
-    server->StartWithSocket(socket_path);\
-  }\
-}\
-\
-}  \/\/ namespace/' "${DELEGATE_CC}"
+    # 4b. InitializeMcpIfNeeded() 함수 정의 — 첫 번째 익명 namespace 닫는 줄 앞에 삽입
+    # awk로 첫 매칭만 처리 (macOS 호환)
+    awk '
+      /^}  \/\/ namespace$/ && !func_inserted {
+        print ""
+        print "void InitializeMcpIfNeeded() {"
+        print "  auto* cmd = base::CommandLine::ForCurrentProcess();"
+        print "  bool mcp_stdio = cmd->HasSwitch(\"mcp-stdio\");"
+        print "  bool mcp_env = (!!getenv(\"CHROMIUM_MCP\"));"
+        print "  std::string socket_path = cmd->GetSwitchValueASCII(\"mcp-socket\");"
+        print "  bool mcp_socket = !socket_path.empty();"
+        print "  if (!mcp_stdio && !mcp_env && !mcp_socket) return;"
+        print "  cmd->RemoveSwitch(\"mcp-stdio\");"
+        print "  cmd->RemoveSwitch(\"mcp-socket\");"
+        print "  unsetenv(\"CHROMIUM_MCP\");"
+        print "  auto* server = mcp::McpServer::GetInstance();"
+        print "  if (mcp_stdio || mcp_env) {"
+        print "    server->StartWithStdio();"
+        print "  } else {"
+        print "    server->StartWithSocket(socket_path);"
+        print "  }"
+        print "}"
+        print ""
+        func_inserted = 1
+      }
+      { print }
+    ' "${DELEGATE_CC}" > "${DELEGATE_CC}.tmp" && mv "${DELEGATE_CC}.tmp" "${DELEGATE_CC}"
 
-    # 4c. PostEarlyInitialization 함수 내에서 마지막 "return std::nullopt;" 앞에 호출 삽입
-    # tac으로 역순 → 첫 번째 매칭(=원본 마지막) → 앞에 삽입 → 다시 역순
-    tac "${DELEGATE_CC}" | sed '0,/return std::nullopt;/{s/return std::nullopt;/\
-  \/\/ MCP 서버 조건부 초기화 (chromium-mcp)\
-  if (process_type.empty()) { InitializeMcpIfNeeded(); }\
-\
-  return std::nullopt;/}' | tac > "${DELEGATE_CC}.tmp" && mv "${DELEGATE_CC}.tmp" "${DELEGATE_CC}"
+    # 4c. PostEarlyInitialization 함수 내 return std::nullopt; 앞에 MCP 호출 삽입
+    # PostEarlyInitialization 함수를 찾고, 그 안의 마지막 return std::nullopt; 앞에 삽입
+    awk '
+      /ChromeMainDelegate::PostEarlyInitialization/ { in_target_func = 1 }
+      in_target_func && /return std::nullopt;/ { last_return_line = NR }
+      in_target_func && /^}/ { in_target_func = 0 }
+      { lines[NR] = $0 }
+      END {
+        for (i = 1; i <= NR; i++) {
+          if (i == last_return_line) {
+            print "  // MCP 서버 조건부 초기화 (chromium-mcp)"
+            print "  if (process_type.empty()) { InitializeMcpIfNeeded(); }"
+            print ""
+          }
+          print lines[i]
+        }
+      }
+    ' "${DELEGATE_CC}" > "${DELEGATE_CC}.tmp" && mv "${DELEGATE_CC}.tmp" "${DELEGATE_CC}"
 
-    success "  chrome_main_delegate.cc: MCP 초기화 코드 삽입 완료"
+    # 삽입 검증
+    if grep -q 'InitializeMcpIfNeeded' "${DELEGATE_CC}"; then
+      success "  chrome_main_delegate.cc: MCP 초기화 코드 삽입 완료"
+    else
+      warn "  chrome_main_delegate.cc: MCP 초기화 코드 삽입 검증 실패"
+      PATCH_FAILED=true
+    fi
   fi
 else
   error "  chrome_main_delegate.cc 파일을 찾을 수 없습니다"
