@@ -214,37 +214,18 @@ class McpServer {
   // -----------------------------------------------------------------------
 
   // 기본 제공 MCP 도구들을 모두 등록.
-  // navigate, screenshot, page_content, click, fill, evaluate,
-  // network_capture, network_requests, tabs, browser_info
+  // navigate, screenshot, page_content, evaluate, network_* 는 tool_registry_ 클래스 기반.
+  // click, fill, browser_info 는 레거시 인라인 유지 (Task 5,6,10에서 처리 예정).
   void RegisterBuiltinTools();
 
-  // 개별 도구 핸들러 등록 메서드
-  void RegisterNavigateTool();
-  void RegisterScreenshotTool();
-  void RegisterPageContentTool();
+  // 레거시 인라인 도구 등록 메서드 (click/fill/browser_info만 유지)
   void RegisterClickTool();
   void RegisterFillTool();
-  void RegisterEvaluateTool();
-  void RegisterNetworkCaptureTool();
-  void RegisterNetworkRequestsTool();
-  void RegisterTabsTool();
   void RegisterBrowserInfoTool();
 
   // -----------------------------------------------------------------------
-  // 도구 실행 핸들러 (내부 CDP 호출)
+  // 도구 실행 핸들러 (내부 CDP 호출) — 레거시 유지분
   // -----------------------------------------------------------------------
-
-  // navigate 도구: Page.navigate CDP 명령 실행
-  void ExecuteNavigate(const base::DictValue& params,
-                       base::OnceCallback<void(base::Value)> callback);
-
-  // screenshot 도구: Page.captureScreenshot CDP 명령 실행
-  void ExecuteScreenshot(const base::DictValue& params,
-                         base::OnceCallback<void(base::Value)> callback);
-
-  // page_content 도구: DOM.getOuterHTML / Accessibility.getFullAXTree 실행
-  void ExecutePageContent(const base::DictValue& params,
-                          base::OnceCallback<void(base::Value)> callback);
 
   // click 도구: CSS 선택자로 요소를 찾아 Input.dispatchMouseEvent 실행
   void ExecuteClick(const base::DictValue& params,
@@ -252,22 +233,6 @@ class McpServer {
 
   // fill 도구: 입력 필드에 값을 입력 (Runtime.evaluate 활용)
   void ExecuteFill(const base::DictValue& params,
-                   base::OnceCallback<void(base::Value)> callback);
-
-  // evaluate 도구: Runtime.evaluate CDP 명령 실행
-  void ExecuteEvaluate(const base::DictValue& params,
-                       base::OnceCallback<void(base::Value)> callback);
-
-  // network_capture 도구: Network.enable/disable CDP 명령 실행
-  void ExecuteNetworkCapture(const base::DictValue& params,
-                             base::OnceCallback<void(base::Value)> callback);
-
-  // network_requests 도구: 캡처된 네트워크 요청 목록 반환
-  void ExecuteNetworkRequests(const base::DictValue& params,
-                              base::OnceCallback<void(base::Value)> callback);
-
-  // tabs 도구: TabStripModel API로 탭 관리
-  void ExecuteTabs(const base::DictValue& params,
                    base::OnceCallback<void(base::Value)> callback);
 
   // browser_info 도구: 브라우저 버전, 활성 탭 정보 반환
