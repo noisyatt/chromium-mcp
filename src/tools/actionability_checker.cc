@@ -11,7 +11,6 @@
 #include <utility>
 
 #include "base/functional/bind.h"
-#include "base/json/json_reader.h"
 #include "base/logging.h"
 #include "base/time/time.h"
 #include "base/values.h"
@@ -84,6 +83,7 @@ void ActionabilityChecker::VerifyAndLocate(McpSession* session,
 // ============================================================
 
 void ActionabilityChecker::StartPoll(std::shared_ptr<PollContext> ctx) {
+  if (!ctx->callback) return;  // 이미 타임아웃으로 콜백 호출됨
   if (ctx->timed_out) {
     RetryOrFail(ctx, "타임아웃");
     return;
@@ -98,6 +98,7 @@ void ActionabilityChecker::OnLocateResult(
     std::shared_ptr<PollContext> ctx,
     std::optional<ElementLocator::Result> result,
     std::string error) {
+  if (!ctx->callback) return;  // 이미 타임아웃으로 콜백 호출됨
   if (ctx->timed_out) {
     RetryOrFail(ctx, "타임아웃");
     return;
@@ -132,6 +133,7 @@ void ActionabilityChecker::OnLocateResult(
 
 void ActionabilityChecker::CheckVisible(std::shared_ptr<PollContext> ctx,
                                         ElementLocator::Result result) {
+  if (!ctx->callback) return;  // 이미 타임아웃으로 콜백 호출됨
   if (ctx->timed_out) {
     RetryOrFail(ctx, "타임아웃");
     return;
@@ -153,6 +155,7 @@ void ActionabilityChecker::OnCheckVisibleResponse(
     std::shared_ptr<PollContext> ctx,
     ElementLocator::Result result,
     base::Value response) {
+  if (!ctx->callback) return;  // 이미 타임아웃으로 콜백 호출됨
   if (ctx->timed_out) {
     RetryOrFail(ctx, "타임아웃");
     return;
@@ -192,25 +195,18 @@ void ActionabilityChecker::OnCheckVisibleResponse(
 
 void ActionabilityChecker::CheckInViewport(std::shared_ptr<PollContext> ctx,
                                            ElementLocator::Result result) {
+  if (!ctx->callback) return;  // 이미 타임아웃으로 콜백 호출됨
   if (ctx->timed_out) {
     RetryOrFail(ctx, "타임아웃");
     return;
   }
 
-  // 뷰포트 크기를 JS로 확인한 후 좌표 비교
-  // 좌표가 이미 result에 있으므로 뷰포트 크기만 조회
+  // 뷰포트 크기를 Page.getLayoutMetrics로 조회 (Runtime.evaluate 사용 시 스텔스 위반)
   LOG(INFO) << "[ActionabilityChecker] IN_VIEWPORT 체크: x=" << result.x
             << " y=" << result.y;
 
-  // Runtime.evaluate로 뷰포트 크기 조회
-  base::Value::Dict params;
-  params.Set("expression",
-             "JSON.stringify({w: window.innerWidth, h: window.innerHeight})");
-  params.Set("returnByValue", true);
-  params.Set("awaitPromise", false);
-
   ctx->session->SendCdpCommand(
-      "Runtime.evaluate", std::move(params),
+      "Page.getLayoutMetrics", base::Value::Dict(),
       base::BindOnce(
           [](std::shared_ptr<PollContext> ctx, ElementLocator::Result result,
              base::Value response) {
@@ -218,28 +214,24 @@ void ActionabilityChecker::CheckInViewport(std::shared_ptr<PollContext> ctx,
               ActionabilityChecker::RetryOrFail(ctx, "타임아웃");
               return;
             }
+            if (!ctx->callback) return;  // 이미 타임아웃으로 콜백 호출됨
 
-            // 뷰포트 크기 파싱
+            // 뷰포트 크기 파싱: cssVisualViewport.clientWidth/clientHeight
             double vp_w = 1280, vp_h = 720;  // 기본값
             if (response.is_dict()) {
               const base::Value::Dict& resp_dict = response.GetDict();
+              // CDP 래퍼: response.result.cssVisualViewport
               const base::Value::Dict* result_obj =
                   resp_dict.FindDict("result");
-              if (result_obj) {
-                const base::Value::Dict* inner =
-                    result_obj->FindDict("result");
-                const base::Value::Dict* eval_result =
-                    inner ? inner : result_obj;
-                const std::string* val_str = eval_result->FindString("value");
-                if (val_str) {
-                  auto parsed = base::JSONReader::Read(*val_str);
-                  if (parsed && parsed->is_dict()) {
-                    std::optional<double> w = parsed->GetDict().FindDouble("w");
-                    std::optional<double> h = parsed->GetDict().FindDouble("h");
-                    if (w) vp_w = *w;
-                    if (h) vp_h = *h;
-                  }
-                }
+              const base::Value::Dict* metrics_dict =
+                  result_obj ? result_obj : &resp_dict;
+              const base::Value::Dict* vp_dict =
+                  metrics_dict->FindDict("cssVisualViewport");
+              if (vp_dict) {
+                std::optional<double> w = vp_dict->FindDouble("clientWidth");
+                std::optional<double> h = vp_dict->FindDouble("clientHeight");
+                if (w) vp_w = *w;
+                if (h) vp_h = *h;
               }
             }
 
@@ -277,6 +269,7 @@ void ActionabilityChecker::ScrollIntoViewIfNeeded(
 void ActionabilityChecker::OnScrollResponse(std::shared_ptr<PollContext> ctx,
                                             ElementLocator::Result result,
                                             base::Value response) {
+  if (!ctx->callback) return;  // 이미 타임아웃으로 콜백 호출됨
   if (ctx->timed_out) {
     RetryOrFail(ctx, "타임아웃");
     return;
@@ -291,6 +284,7 @@ void ActionabilityChecker::OnScrollResponse(std::shared_ptr<PollContext> ctx,
       base::BindOnce(
           [](std::shared_ptr<PollContext> ctx, ElementLocator::Result result,
              base::Value response) {
+            if (!ctx->callback) return;  // 이미 타임아웃으로 콜백 호출됨
             if (ctx->timed_out) {
               ActionabilityChecker::RetryOrFail(ctx, "타임아웃");
               return;
@@ -323,6 +317,7 @@ void ActionabilityChecker::OnScrollResponse(std::shared_ptr<PollContext> ctx,
 
 void ActionabilityChecker::CheckStable(std::shared_ptr<PollContext> ctx,
                                        ElementLocator::Result result) {
+  if (!ctx->callback) return;  // 이미 타임아웃으로 콜백 호출됨
   if (ctx->timed_out) {
     RetryOrFail(ctx, "타임아웃");
     return;
@@ -338,6 +333,7 @@ void ActionabilityChecker::CheckStable(std::shared_ptr<PollContext> ctx,
       base::BindOnce(
           [](std::shared_ptr<PollContext> ctx, ElementLocator::Result result,
              base::Value response) {
+            if (!ctx->callback) return;  // 이미 타임아웃으로 콜백 호출됨
             if (ctx->timed_out) {
               ActionabilityChecker::RetryOrFail(ctx, "타임아웃");
               return;
@@ -365,6 +361,7 @@ void ActionabilityChecker::CheckStable(std::shared_ptr<PollContext> ctx,
                     [](std::shared_ptr<PollContext> ctx,
                        ElementLocator::Result result, double first_x,
                        double first_y) {
+                      if (!ctx->callback) return;  // 이미 타임아웃으로 콜백 호출됨
                       if (ctx->timed_out) {
                         ActionabilityChecker::RetryOrFail(ctx, "타임아웃");
                         return;
@@ -389,6 +386,7 @@ void ActionabilityChecker::OnStableSecondMeasure(
     double first_x,
     double first_y,
     base::Value response) {
+  if (!ctx->callback) return;  // 이미 타임아웃으로 콜백 호출됨
   if (ctx->timed_out) {
     RetryOrFail(ctx, "타임아웃");
     return;
@@ -438,6 +436,7 @@ void ActionabilityChecker::OnStableSecondMeasure(
 
 void ActionabilityChecker::CheckEnabled(std::shared_ptr<PollContext> ctx,
                                         ElementLocator::Result result) {
+  if (!ctx->callback) return;  // 이미 타임아웃으로 콜백 호출됨
   if (ctx->timed_out) {
     RetryOrFail(ctx, "타임아웃");
     return;
@@ -460,6 +459,7 @@ void ActionabilityChecker::OnCheckEnabledResponse(
     std::shared_ptr<PollContext> ctx,
     ElementLocator::Result result,
     base::Value response) {
+  if (!ctx->callback) return;  // 이미 타임아웃으로 콜백 호출됨
   if (ctx->timed_out) {
     RetryOrFail(ctx, "타임아웃");
     return;
@@ -551,7 +551,8 @@ void ActionabilityChecker::Complete(std::shared_ptr<PollContext> ctx,
 void ActionabilityChecker::RetryOrFail(std::shared_ptr<PollContext> ctx,
                                        const std::string& reason) {
   if (ctx->timed_out) {
-    // 타임아웃 → 즉시 실패
+    // 타임아웃 → OnTimeout이 이미 콜백을 호출했을 수 있으므로 체크
+    if (!ctx->callback) return;  // 이미 OnTimeout에서 콜백 호출됨
     ctx->poll_timer.Stop();
     LOG(WARNING) << "[ActionabilityChecker] 타임아웃으로 실패: " << reason;
     ElementLocator::Result empty;
@@ -579,7 +580,15 @@ void ActionabilityChecker::OnTimeout(std::shared_ptr<PollContext> ctx) {
   LOG(WARNING) << "[ActionabilityChecker] 타임아웃 발생 ("
                << ctx->options.timeout_ms << "ms)";
   ctx->timed_out = true;
-  // 다음 RetryOrFail 호출 시 즉시 실패 처리됨
+  ctx->poll_timer.Stop();
+
+  // 콜백이 아직 살아 있으면 즉시 실패 호출
+  // (이후 도착하는 CDP 응답은 !ctx->callback 체크로 무시됨)
+  if (ctx->callback) {
+    ElementLocator::Result empty;
+    std::move(ctx->callback)
+        .Run(empty, "타임아웃: 요소가 actionable 상태가 되지 않았습니다");
+  }
 }
 
 // ============================================================

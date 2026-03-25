@@ -50,7 +50,9 @@ class ActionabilityChecker {
     bool force = false;
   };
 
-  // 성공: {Result, ""} / 실패: {nullopt Result, "에러 메시지"}
+  // Callback 규약:
+  // - 성공: result에 유효한 값, error 빈 문자열
+  // - 실패: result는 기본값(모두 0/""), error에 메시지
   using Callback = base::OnceCallback<void(ElementLocator::Result result,
                                            std::string error)>;
 
@@ -85,67 +87,67 @@ class ActionabilityChecker {
   };
 
   // -----------------------------------------------------------------------
-  // 폴링 루프
+  // 폴링 루프 (모두 static — 인스턴스 불필요, ctx로만 상태 접근)
   // -----------------------------------------------------------------------
 
   // locator.Locate() 호출 → OnLocateResult
-  void StartPoll(std::shared_ptr<PollContext> ctx);
+  static void StartPoll(std::shared_ptr<PollContext> ctx);
 
   // Locate 결과 수신
-  void OnLocateResult(std::shared_ptr<PollContext> ctx,
-                      std::optional<ElementLocator::Result> result,
-                      std::string error);
+  static void OnLocateResult(std::shared_ptr<PollContext> ctx,
+                             std::optional<ElementLocator::Result> result,
+                             std::string error);
 
   // -----------------------------------------------------------------------
-  // 순차 체크 체인
+  // 순차 체크 체인 (모두 static)
   // -----------------------------------------------------------------------
 
   // 1단계: VISIBLE — DOM.getBoxModel 성공 여부
-  void CheckVisible(std::shared_ptr<PollContext> ctx,
-                    ElementLocator::Result result);
-  void OnCheckVisibleResponse(std::shared_ptr<PollContext> ctx,
-                              ElementLocator::Result result,
-                              base::Value response);
+  static void CheckVisible(std::shared_ptr<PollContext> ctx,
+                           ElementLocator::Result result);
+  static void OnCheckVisibleResponse(std::shared_ptr<PollContext> ctx,
+                                     ElementLocator::Result result,
+                                     base::Value response);
 
   // 2단계: IN_VIEWPORT + scrollIntoViewIfNeeded
-  void CheckInViewport(std::shared_ptr<PollContext> ctx,
-                       ElementLocator::Result result);
-  void ScrollIntoViewIfNeeded(std::shared_ptr<PollContext> ctx,
+  static void CheckInViewport(std::shared_ptr<PollContext> ctx,
                               ElementLocator::Result result);
-  void OnScrollResponse(std::shared_ptr<PollContext> ctx,
-                        ElementLocator::Result result,
-                        base::Value response);
+  static void ScrollIntoViewIfNeeded(std::shared_ptr<PollContext> ctx,
+                                     ElementLocator::Result result);
+  static void OnScrollResponse(std::shared_ptr<PollContext> ctx,
+                               ElementLocator::Result result,
+                               base::Value response);
 
   // 3단계: STABLE — 50ms 간격 2회 측정, 차이 2px 이내
-  void CheckStable(std::shared_ptr<PollContext> ctx,
-                   ElementLocator::Result result);
-  void OnStableSecondMeasure(std::shared_ptr<PollContext> ctx,
-                             ElementLocator::Result result,
-                             double first_x,
-                             double first_y,
-                             base::Value response);
+  static void CheckStable(std::shared_ptr<PollContext> ctx,
+                          ElementLocator::Result result);
+  static void OnStableSecondMeasure(std::shared_ptr<PollContext> ctx,
+                                    ElementLocator::Result result,
+                                    double first_x,
+                                    double first_y,
+                                    base::Value response);
 
   // 4단계: ENABLED + 5단계: EDITABLE
-  void CheckEnabled(std::shared_ptr<PollContext> ctx,
-                    ElementLocator::Result result);
-  void OnCheckEnabledResponse(std::shared_ptr<PollContext> ctx,
-                              ElementLocator::Result result,
-                              base::Value response);
+  static void CheckEnabled(std::shared_ptr<PollContext> ctx,
+                           ElementLocator::Result result);
+  static void OnCheckEnabledResponse(std::shared_ptr<PollContext> ctx,
+                                     ElementLocator::Result result,
+                                     base::Value response);
 
   // -----------------------------------------------------------------------
-  // 완료/재시도/타임아웃
+  // 완료/재시도/타임아웃 (모두 static)
   // -----------------------------------------------------------------------
 
   // 모든 체크 통과 → callback 성공 호출
-  void Complete(std::shared_ptr<PollContext> ctx,
-                ElementLocator::Result result);
+  static void Complete(std::shared_ptr<PollContext> ctx,
+                       ElementLocator::Result result);
 
   // 체크 실패 → timed_out 이면 에러 콜백, 아니면 poll_timer로 재시도
-  void RetryOrFail(std::shared_ptr<PollContext> ctx,
-                   const std::string& reason);
+  static void RetryOrFail(std::shared_ptr<PollContext> ctx,
+                          const std::string& reason);
 
-  // timeout_timer 만료 → timed_out = true
-  void OnTimeout(std::shared_ptr<PollContext> ctx);
+  // timeout_timer 만료 → 즉시 콜백 호출
+  static void OnTimeout(std::shared_ptr<PollContext> ctx);
 
   // -----------------------------------------------------------------------
   // 액션별 필요 체크 (static)
