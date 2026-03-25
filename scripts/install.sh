@@ -110,25 +110,25 @@ info "Chromium 소스에 MCP 통합 코드를 삽입합니다..."
 
 PATCH_FAILED=false
 
-# --- 1. chrome/browser/BUILD.gn : deps에 "//chrome/browser/mcp" 추가 ---
-BUILD_GN="${CHROMIUM_SRC}/chrome/browser/BUILD.gn"
-if [[ -f "${BUILD_GN}" ]]; then
-  if grep -q '//chrome/browser/mcp' "${BUILD_GN}"; then
-    success "  BUILD.gn: MCP 의존성 이미 존재"
+# --- 1. chrome/BUILD.gn : public_deps에 "//chrome/browser/mcp" 추가 ---
+# chrome/browser/BUILD.gn이 아닌 chrome/BUILD.gn에 추가하여 순환 의존 방지
+CHROME_GN="${CHROMIUM_SRC}/chrome/BUILD.gn"
+if [[ -f "${CHROME_GN}" ]]; then
+  if grep -q '//chrome/browser/mcp' "${CHROME_GN}"; then
+    success "  chrome/BUILD.gn: MCP 의존성 이미 존재"
   else
-    # static_library("browser") 블록의 deps 안에서 "//chrome/browser/ui" 뒤에 삽입 (첫 매칭만)
-    if grep -q '"//chrome/browser/ui"' "${BUILD_GN}"; then
-      awk '/"\/\/chrome\/browser\/ui"/ && !done {
+    if grep -q '"//chrome/browser",' "${CHROME_GN}"; then
+      awk 'BEGIN{done=0} /\"\/\/chrome\/browser\",/ && done==0 {
         print; print "    \"//chrome/browser/mcp\","; done=1; next
-      } {print}' "${BUILD_GN}" > "${BUILD_GN}.tmp" && mv "${BUILD_GN}.tmp" "${BUILD_GN}"
-      success "  BUILD.gn: MCP 의존성 추가 완료"
+      } {print}' "${CHROME_GN}" > "${CHROME_GN}.tmp" && mv "${CHROME_GN}.tmp" "${CHROME_GN}"
+      success "  chrome/BUILD.gn: MCP 의존성 추가 완료"
     else
-      warn "  BUILD.gn: '//chrome/browser/ui' 패턴을 찾을 수 없습니다"
+      warn "  chrome/BUILD.gn: '//chrome/browser' 패턴을 찾을 수 없습니다"
       PATCH_FAILED=true
     fi
   fi
 else
-  error "  BUILD.gn 파일을 찾을 수 없습니다: ${BUILD_GN}"
+  error "  chrome/BUILD.gn 파일을 찾을 수 없습니다"
   PATCH_FAILED=true
 fi
 

@@ -132,9 +132,6 @@ source_set("mcp") {
     # CDP JSON 직렬화
     "//third_party/inspector_protocol:crdtp",
 
-    # 브라우저 UI (탭 스트립, Browser 클래스)
-    "//chrome/browser/ui",
-
     # 버전 정보
     "//components/version_info",
 
@@ -144,17 +141,12 @@ source_set("mcp") {
     # 클립보드 API (clipboard_tool)
     "//ui/base",
 
-    # 히스토리 서비스 (history_tool)
+    # 히스토리/북마크/프로파일/UI 헤더는 //chrome/browser:browser에 포함됨.
+    # mcp가 browser의 deps이므로 순환 의존 없이 헤더 접근 가능.
+    # (//chrome/browser/ui, //chrome/browser/history, //chrome/browser/profiles,
+    #  //chrome/browser/bookmarks 는 명시적 deps로 넣으면 순환 발생)
     "//components/history/core/browser",
-    "//chrome/browser/history",
-
-    # 북마크 모델 (bookmark_tool)
-    # bookmark_model_factory.h 는 //chrome/browser:browser에 포함되어 있으며
-    # mcp도 같은 browser 타겟의 deps이므로 헤더 접근 가능 (순환 의존 방지)
     "//components/bookmarks/browser",
-
-    # 프로파일 (히스토리/북마크 팩토리 접근)
-    "//chrome/browser/profiles",
   ]
 
   public_deps = [
