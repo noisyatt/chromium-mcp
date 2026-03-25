@@ -38,7 +38,7 @@ ActionabilityChecker::~ActionabilityChecker() = default;
 // ============================================================
 
 void ActionabilityChecker::VerifyAndLocate(McpSession* session,
-                                           const base::Value::Dict& params,
+                                           const base::DictValue& params,
                                            ActionType action,
                                            Options options,
                                            Callback callback) {
@@ -142,7 +142,7 @@ void ActionabilityChecker::CheckVisible(std::shared_ptr<PollContext> ctx,
   LOG(INFO) << "[ActionabilityChecker] VISIBLE 체크: backendNodeId="
             << result.backend_node_id;
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("backendNodeId", result.backend_node_id);
 
   ctx->session->SendCdpCommand(
@@ -206,7 +206,7 @@ void ActionabilityChecker::CheckInViewport(std::shared_ptr<PollContext> ctx,
             << " y=" << result.y;
 
   ctx->session->SendCdpCommand(
-      "Page.getLayoutMetrics", base::Value::Dict(),
+      "Page.getLayoutMetrics", base::DictValue(),
       base::BindOnce(
           [](std::shared_ptr<PollContext> ctx, ElementLocator::Result result,
              base::Value response) {
@@ -219,13 +219,13 @@ void ActionabilityChecker::CheckInViewport(std::shared_ptr<PollContext> ctx,
             // 뷰포트 크기 파싱: cssVisualViewport.clientWidth/clientHeight
             double vp_w = 1280, vp_h = 720;  // 기본값
             if (response.is_dict()) {
-              const base::Value::Dict& resp_dict = response.GetDict();
+              const base::DictValue& resp_dict = response.GetDict();
               // CDP 래퍼: response.result.cssVisualViewport
-              const base::Value::Dict* result_obj =
+              const base::DictValue* result_obj =
                   resp_dict.FindDict("result");
-              const base::Value::Dict* metrics_dict =
+              const base::DictValue* metrics_dict =
                   result_obj ? result_obj : &resp_dict;
-              const base::Value::Dict* vp_dict =
+              const base::DictValue* vp_dict =
                   metrics_dict->FindDict("cssVisualViewport");
               if (vp_dict) {
                 std::optional<double> w = vp_dict->FindDouble("clientWidth");
@@ -258,7 +258,7 @@ void ActionabilityChecker::CheckInViewport(std::shared_ptr<PollContext> ctx,
 void ActionabilityChecker::ScrollIntoViewIfNeeded(
     std::shared_ptr<PollContext> ctx,
     ElementLocator::Result result) {
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("backendNodeId", result.backend_node_id);
 
   ctx->session->SendCdpCommand(
@@ -276,7 +276,7 @@ void ActionabilityChecker::OnScrollResponse(std::shared_ptr<PollContext> ctx,
   }
 
   // 스크롤 후 좌표 재취득
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("backendNodeId", result.backend_node_id);
 
   ctx->session->SendCdpCommand(
@@ -325,7 +325,7 @@ void ActionabilityChecker::CheckStable(std::shared_ptr<PollContext> ctx,
 
   LOG(INFO) << "[ActionabilityChecker] STABLE 체크 시작 (1차 측정)";
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("backendNodeId", result.backend_node_id);
 
   ctx->session->SendCdpCommand(
@@ -367,7 +367,7 @@ void ActionabilityChecker::CheckStable(std::shared_ptr<PollContext> ctx,
                         return;
                       }
 
-                      base::Value::Dict p2;
+                      base::DictValue p2;
                       p2.Set("backendNodeId", result.backend_node_id);
                       ctx->session->SendCdpCommand(
                           "DOM.getBoxModel", std::move(p2),
@@ -445,7 +445,7 @@ void ActionabilityChecker::CheckEnabled(std::shared_ptr<PollContext> ctx,
   LOG(INFO) << "[ActionabilityChecker] ENABLED 체크: backendNodeId="
             << result.backend_node_id;
 
-  base::Value::Dict params;
+  base::DictValue params;
   params.Set("backendNodeId", result.backend_node_id);
   params.Set("fetchRelatives", false);
 
@@ -474,7 +474,7 @@ void ActionabilityChecker::OnCheckEnabledResponse(
     return;
   }
 
-  const base::Value::Dict* resp_dict =
+  const base::DictValue* resp_dict =
       response.is_dict() ? &response.GetDict() : nullptr;
   if (!resp_dict) {
     Complete(ctx, result);
@@ -482,35 +482,35 @@ void ActionabilityChecker::OnCheckEnabledResponse(
   }
 
   // CDP 응답 래퍼 벗기기: result.nodes
-  const base::Value::Dict* result_obj = resp_dict->FindDict("result");
-  const base::Value::Dict* nodes_container = result_obj ? result_obj : resp_dict;
-  const base::Value::List* nodes = nodes_container->FindList("nodes");
+  const base::DictValue* result_obj = resp_dict->FindDict("result");
+  const base::DictValue* nodes_container = result_obj ? result_obj : resp_dict;
+  const base::ListValue* nodes = nodes_container->FindList("nodes");
   if (!nodes || nodes->empty()) {
     Complete(ctx, result);
     return;
   }
 
   // 첫 번째 노드의 properties 검사
-  const base::Value::Dict* node_dict = (*nodes)[0].GetIfDict();
+  const base::DictValue* node_dict = (*nodes)[0].GetIfDict();
   if (!node_dict) {
     Complete(ctx, result);
     return;
   }
 
-  const base::Value::List* props = node_dict->FindList("properties");
+  const base::ListValue* props = node_dict->FindList("properties");
   if (!props) {
     Complete(ctx, result);
     return;
   }
 
   for (const base::Value& prop_val : *props) {
-    const base::Value::Dict* prop = prop_val.GetIfDict();
+    const base::DictValue* prop = prop_val.GetIfDict();
     if (!prop) continue;
 
     const std::string* name = prop->FindString("name");
     if (!name) continue;
 
-    const base::Value::Dict* value_dict = prop->FindDict("value");
+    const base::DictValue* value_dict = prop->FindDict("value");
     if (!value_dict) continue;
 
     const base::Value* val = value_dict->Find("value");

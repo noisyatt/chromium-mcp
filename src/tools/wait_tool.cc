@@ -240,7 +240,7 @@ void WaitTool::Execute(const base::DictValue& arguments,
   } else if (wait_type == "selector") {
     // 로케이터 파라미터를 Dict으로 수집
     // (role/name/text/selector/xpath 중 하나 이상 필요)
-    base::Value::Dict locator_params;
+    base::DictValue locator_params;
 
     auto copy_str = [&](const char* key) {
       const std::string* val = arguments.FindString(key);
@@ -356,7 +356,7 @@ void WaitTool::WaitForText(const std::string& text,
 // type=selector: ElementLocator + DOM.getBoxModel 가시성 확인
 // ============================================================
 
-void WaitTool::WaitForSelector(base::Value::Dict locator_params,
+void WaitTool::WaitForSelector(base::DictValue locator_params,
                                 bool require_visible,
                                 int timeout_ms,
                                 int interval_ms,

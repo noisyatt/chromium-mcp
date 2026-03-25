@@ -25,7 +25,7 @@ base::Value MakeSuccessResult(const std::string& message);
 base::Value MakeErrorResult(const std::string& message);
 
 // JSON Dict를 MCP 결과 Value로 감싸서 반환
-base::Value MakeJsonResult(base::Value::Dict result_dict);
+base::Value MakeJsonResult(base::DictValue result_dict);
 
 // DOM.getDocument 응답에서 rootNodeId를 추출한다.
 int ExtractRootNodeId(const base::Value& response);
@@ -42,7 +42,7 @@ bool ExtractBoxModelCenter(const base::Value& response,
 // out_rect에 {x, y, width, height} 키를 설정한다.
 // content quad: [x1,y1, x2,y2, x3,y3, x4,y4] — 시계방향 4꼭짓점
 bool ExtractBoundingBox(const base::Value& response,
-                        base::Value::Dict* out_rect);
+                        base::DictValue* out_rect);
 
 // CDP 에러 처리 헬퍼: 에러가 있으면 callback을 호출하고 true를 반환한다.
 // NOLINTNEXTLINE(runtime/references)

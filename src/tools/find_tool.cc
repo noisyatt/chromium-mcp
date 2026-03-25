@@ -514,7 +514,7 @@ void FindTool::OnAXBoxModel(std::shared_ptr<SearchContext> ctx,
   item.Set("enabled", entry.enabled);
 
   bool visible = false;
-  base::Value::Dict bbox;
+  base::DictValue bbox;
 
   if (!HasCdpError(response)) {
     if (ExtractBoundingBox(response, &bbox)) {
@@ -849,7 +849,7 @@ void FindTool::OnDomBoxModel(std::shared_ptr<SearchContext> ctx,
                              base::DictValue attributes,
                              base::Value response) {
   bool visible = false;
-  base::Value::Dict bbox;
+  base::DictValue bbox;
 
   if (!HasCdpError(response)) {
     if (ExtractBoundingBox(response, &bbox))

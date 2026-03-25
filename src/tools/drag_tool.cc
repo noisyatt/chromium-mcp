@@ -216,7 +216,7 @@ void DragTool::Execute(const base::DictValue& arguments,
     // 로케이터 모드: start/end 각각 ElementLocator 어댑터 파라미터 구성
 
     // 시작 요소 파라미터: startRole→role, startName→name, startText→text
-    base::Value::Dict start_params;
+    base::DictValue start_params;
     if (start_role && !start_role->empty()) {
       start_params.Set("role", *start_role);
     }
@@ -236,7 +236,7 @@ void DragTool::Execute(const base::DictValue& arguments,
     }
 
     // 끝 요소 파라미터: endRole→role, endName→name, endText→text
-    base::Value::Dict end_params;
+    base::DictValue end_params;
     if (end_role && !end_role->empty()) {
       end_params.Set("role", *end_role);
     }
@@ -288,7 +288,7 @@ void DragTool::Execute(const base::DictValue& arguments,
 }
 
 // 시작 요소 로케이터 콜백
-void DragTool::OnStartLocated(base::Value::Dict end_params,
+void DragTool::OnStartLocated(base::DictValue end_params,
                               int steps,
                               McpSession* session,
                               base::OnceCallback<void(base::Value)> callback,

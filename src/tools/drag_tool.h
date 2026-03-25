@@ -48,7 +48,7 @@ class DragTool : public McpTool {
 
  private:
   // 시작 요소 로케이터 콜백
-  void OnStartLocated(base::Value::Dict end_params,
+  void OnStartLocated(base::DictValue end_params,
                       int steps,
                       McpSession* session,
                       base::OnceCallback<void(base::Value)> callback,

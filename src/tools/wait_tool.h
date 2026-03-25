@@ -75,7 +75,7 @@ class WaitTool : public McpTool {
     // ElementLocator 인스턴스 (selector 모드에서 per-request로 생성)
     std::unique_ptr<ElementLocator> locator;
     // 로케이터 파라미터 저장 (폴링 시 반복 사용)
-    base::Value::Dict locator_params;
+    base::DictValue locator_params;
     // visible=false 이면 DOM 존재만 확인 (박스 모델 없어도 통과)
     bool require_visible = true;
   };
@@ -95,7 +95,7 @@ class WaitTool : public McpTool {
                    base::OnceCallback<void(base::Value)> callback);
 
   // selector 모드: ElementLocator + DOM.getBoxModel 가시성 확인
-  void WaitForSelector(base::Value::Dict locator_params,
+  void WaitForSelector(base::DictValue locator_params,
                        bool require_visible,
                        int timeout_ms,
                        int interval_ms,

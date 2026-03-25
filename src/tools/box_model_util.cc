@@ -43,7 +43,7 @@ base::Value MakeErrorResult(const std::string& message) {
 
 // JSON Dict를 MCP 결과 Value로 감싸서 반환
 // MCP 프로토콜에서 text 필드는 문자열이어야 하므로 Dict를 JSON 문자열로 직렬화
-base::Value MakeJsonResult(base::Value::Dict result_dict) {
+base::Value MakeJsonResult(base::DictValue result_dict) {
   std::string json_str;
   base::JSONWriter::Write(base::Value(std::move(result_dict)), &json_str);
 
@@ -146,7 +146,7 @@ bool ExtractBoxModelCenter(const base::Value& response,
 // x = content[0], y = content[1]
 // width = content[4] - content[0], height = content[5] - content[1]
 bool ExtractBoundingBox(const base::Value& response,
-                        base::Value::Dict* out_rect) {
+                        base::DictValue* out_rect) {
   const base::DictValue* dict = response.GetIfDict();
   if (!dict) {
     return false;

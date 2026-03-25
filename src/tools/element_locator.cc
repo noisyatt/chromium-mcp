@@ -24,7 +24,7 @@ ElementLocator::~ElementLocator() = default;
 // ============================================================
 
 void ElementLocator::Locate(McpSession* session,
-                            const base::Value::Dict& params,
+                            const base::DictValue& params,
                             Callback callback) {
   // exact 파라미터 (role/name, text 매칭 시 사용, 기본값 false = 부분 일치)
   bool exact = params.FindBool("exact").value_or(false);

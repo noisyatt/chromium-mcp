@@ -62,7 +62,7 @@ class ActionabilityChecker {
   // 진입점: 요소를 찾고 actionability를 검증한다.
   // force=true 이면 Locate만 수행하고 체크를 건너뛴다.
   void VerifyAndLocate(McpSession* session,
-                       const base::Value::Dict& params,
+                       const base::DictValue& params,
                        ActionType action,
                        Options options,
                        Callback callback);
@@ -81,7 +81,7 @@ class ActionabilityChecker {
     Callback callback;
     McpSession* session = nullptr;
     ActionType action = ActionType::kClick;
-    base::Value::Dict params;
+    base::DictValue params;
     Options options;
     bool timed_out = false;
   };

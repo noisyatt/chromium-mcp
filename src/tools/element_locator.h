@@ -52,7 +52,7 @@ class ElementLocator {
   // 우선순위: role/name > text > selector > xpath > ref
   // 파라미터가 하나도 없으면 에러 콜백 호출.
   void Locate(McpSession* session,
-              const base::Value::Dict& params,
+              const base::DictValue& params,
               Callback callback);
 
  private:
