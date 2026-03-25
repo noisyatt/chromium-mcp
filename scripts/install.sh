@@ -104,6 +104,8 @@ fi
 success "소스 파일 복사 완료 → ${MCP_TARGET}"
 
 # ─── 패치 적용 (직접 코드 삽입 방식) ──────────────────────────────────────────
+# 패치 섹션에서는 개별 실패를 경고로 처리하므로 set -e를 임시 해제
+set +e
 info "Chromium 소스에 MCP 통합 코드를 삽입합니다..."
 
 PATCH_FAILED=false
@@ -204,12 +206,13 @@ void InitializeMcpIfNeeded() {\
 \
 }  \/\/ namespace/' "${DELEGATE_CC}"
 
-    # 4c. PostEarlyInitialization 함수 내에서 "return std::nullopt;" 앞에 호출 삽입
-    # 마지막 "return std::nullopt;" 앞에 삽입 (함수 끝)
-    # tac으로 역순 → 첫 번째 매칭 → 다시 역순
-    tac "${DELEGATE_CC}" | sed '0,/return std::nullopt;/{s/return std::nullopt;/return std::nullopt;\
+    # 4c. PostEarlyInitialization 함수 내에서 마지막 "return std::nullopt;" 앞에 호출 삽입
+    # tac으로 역순 → 첫 번째 매칭(=원본 마지막) → 앞에 삽입 → 다시 역순
+    tac "${DELEGATE_CC}" | sed '0,/return std::nullopt;/{s/return std::nullopt;/\
   \/\/ MCP 서버 조건부 초기화 (chromium-mcp)\
-  if (process_type.empty()) { InitializeMcpIfNeeded(); }/}' | tac > "${DELEGATE_CC}.tmp" && mv "${DELEGATE_CC}.tmp" "${DELEGATE_CC}"
+  if (process_type.empty()) { InitializeMcpIfNeeded(); }\
+\
+  return std::nullopt;/}' | tac > "${DELEGATE_CC}.tmp" && mv "${DELEGATE_CC}.tmp" "${DELEGATE_CC}"
 
     success "  chrome_main_delegate.cc: MCP 초기화 코드 삽입 완료"
   fi
@@ -227,6 +230,9 @@ if [[ "${PATCH_FAILED}" == "true" ]]; then
 else
   success "모든 MCP 통합 코드 삽입 완료"
 fi
+
+# set -e 복원
+set -e
 
 # ─── 완료 메시지 ─────────────────────────────────────────────────────────────
 echo ""
