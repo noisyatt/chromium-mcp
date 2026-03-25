@@ -83,6 +83,10 @@ source_set("mcp") {
     "tools/clipboard_tool.cc",
     "tools/clipboard_tool.h",
 
+    # ========== 요소 탐색 ==========
+    "tools/element_locator.cc",
+    "tools/element_locator.h",
+
     # ========== 요소/검색 도구 ==========
     "tools/element_tool.cc",
     "tools/element_tool.h",

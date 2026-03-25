@@ -72,6 +72,11 @@ bool McpSession::Attach() {
 
   LOG(INFO) << "[McpSession] CDP 세션 연결 완료. URL: "
             << agent_host_->GetURL().spec();
+
+  // Accessibility 도메인 활성화 (ElementLocator의 AX Tree 조회에 필요)
+  SendCdpCommand("Accessibility.enable", base::DictValue(),
+                 base::BindOnce([](base::Value) {}));
+
   return true;
 }
 
