@@ -19,6 +19,11 @@ namespace mcp {
 ElementLocator::ElementLocator() = default;
 ElementLocator::~ElementLocator() = default;
 
+ElementLocator::Result::Result() = default;
+ElementLocator::Result::~Result() = default;
+ElementLocator::Result::Result(const Result&) = default;
+ElementLocator::Result& ElementLocator::Result::operator=(const Result&) = default;
+
 // ============================================================
 // Locate: 파라미터에서 로케이터 타입 판별 및 디스패치
 // ============================================================

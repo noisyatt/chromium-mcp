@@ -31,6 +31,11 @@ class ElementLocator {
  public:
   // 요소 탐색 결과.
   struct Result {
+    Result();
+    ~Result();
+    Result(const Result&);
+    Result& operator=(const Result&);
+
     int backend_node_id = 0;  // DOM.getBoxModel에 사용된 backendNodeId
     int node_id = 0;          // DOM nodeId (0이면 미사용)
     double x = 0;             // 요소 중심 X 좌표
