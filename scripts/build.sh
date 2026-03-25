@@ -155,13 +155,18 @@ info "  빌드 디렉토리: ${BUILD_DIR}"
 # MCP 관련 플래그 활성화 + 기본 릴리스 설정
 DEFAULT_GN_ARGS=(
   "is_debug=false"
-  "is_component_build=false"
-  "symbol_level=0"          # 심볼 제거로 빌드 속도 향상
-  "enable_nacl=false"       # NaCl 비활성화로 빌드 시간 단축
+  "is_component_build=true"           # 링킹 시간 대폭 단축 (dylib 분할)
+  "symbol_level=0"                    # 디버그 심볼 제거
+  "blink_symbol_level=0"              # Blink 심볼도 제거
+  "v8_symbol_level=0"                 # V8 심볼도 제거
+  "use_thin_lto=false"                # LTO 비활성화 (링킹 속도)
+  "chrome_pgo_phase=0"                # PGO 비활성화
+  "dcheck_always_on=false"            # DCHECK 비활성화
+  "enable_iterator_debugging=false"   # STL 디버깅 비활성화
 )
 
 # 사용자 지정 GN 인자를 기본값 뒤에 추가 (오버라이드 허용)
-ALL_GN_ARGS=("${DEFAULT_GN_ARGS[@]}" "${EXTRA_GN_ARGS[@]}")
+ALL_GN_ARGS=("${DEFAULT_GN_ARGS[@]}" "${EXTRA_GN_ARGS[@]+"${EXTRA_GN_ARGS[@]}"}")
 
 # GN 인자를 공백으로 구분된 단일 문자열로 변환
 GN_ARGS_STR="${ALL_GN_ARGS[*]}"
