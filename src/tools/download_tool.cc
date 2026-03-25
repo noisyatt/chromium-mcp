@@ -217,12 +217,13 @@ void DownloadTool::OnDownloadBehaviorSet(
     }
   }
 
-  // JS 내 작은따옴표 충돌 방지를 위해 큰따옴표 이스케이프 처리
+  // JS 문자열 내 특수문자 이스케이프 처리 (작은따옴표, 큰따옴표, 역슬래시)
   auto escape_js_str = [](const std::string& s) {
     std::string out;
     out.reserve(s.size());
     for (char c : s) {
       if (c == '\'') out += "\\'";
+      else if (c == '"') out += "\\\"";
       else if (c == '\\') out += "\\\\";
       else out += c;
     }

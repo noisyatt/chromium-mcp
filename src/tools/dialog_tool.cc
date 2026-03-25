@@ -273,7 +273,16 @@ void DialogTool::OnJavaScriptDialogOpening(
     registered_session_->SendCdpCommand(
         "Page.handleJavaScriptDialog", std::move(handle_params),
         base::BindOnce([](base::Value response) {
-          // autoHandle 자동 처리 응답은 로그만 남기고 무시
+          if (response.is_dict()) {
+            const base::DictValue* err_dict =
+                response.GetDict().FindDict("error");
+            if (err_dict) {
+              const std::string* msg = err_dict->FindString("message");
+              LOG(ERROR) << "[DialogTool] autoHandle 처리 실패: "
+                         << (msg ? *msg : "알 수 없는 오류");
+              return;
+            }
+          }
           LOG(INFO) << "[DialogTool] autoHandle 처리 완료";
         }));
   }

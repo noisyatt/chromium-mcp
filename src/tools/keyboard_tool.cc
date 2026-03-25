@@ -102,6 +102,11 @@ int KeyNameToVirtualKeyCode(const std::string& key) {
   if (key == "F10") return 121;
   if (key == "F11") return 122;
   if (key == "F12") return 123;
+  // modifier 단독 키
+  if (key == "Shift") return 16;
+  if (key == "Control" || key == "Ctrl") return 17;
+  if (key == "Alt") return 18;
+  if (key == "Meta" || key == "Command") return 91;
   // 특수 키
   if (key == "Space" || key == " ") return 32;
   if (key == "CapsLock") return 20;
@@ -140,6 +145,11 @@ std::string KeyNameToCode(const std::string& key) {
   if (key == "End") return "End";
   if (key == "PageUp") return "PageUp";
   if (key == "PageDown") return "PageDown";
+  // modifier 단독 키
+  if (key == "Shift") return "ShiftLeft";
+  if (key == "Control" || key == "Ctrl") return "ControlLeft";
+  if (key == "Alt") return "AltLeft";
+  if (key == "Meta" || key == "Command") return "MetaLeft";
   // 특수 키
   if (key == "Space" || key == " ") return "Space";
   if (key == "CapsLock") return "CapsLock";
