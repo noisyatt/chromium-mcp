@@ -31,6 +31,10 @@ source_set("mcp") {
     "tools/page_content_tool.cc",
     "tools/page_content_tool.h",
 
+    # ========== 공유 유틸 ==========
+    "tools/box_model_util.cc",
+    "tools/box_model_util.h",
+
     # ========== DOM/입력 도구 ==========
     "tools/dom_tool.cc",
     "tools/dom_tool.h",
