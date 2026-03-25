@@ -202,6 +202,16 @@ void DragTool::Execute(const base::DictValue& arguments,
       (end_text && !end_text->empty()) ||
       (end_selector && !end_selector->empty());
 
+  // 혼합 케이스 방지: start만 로케이터이거나 end만 로케이터인 경우 에러
+  if (has_start_locator != has_end_locator) {
+    LOG(WARNING) << "[DragTool] 시작/끝 로케이터 혼합 사용 불가: "
+                 << "has_start_locator=" << has_start_locator
+                 << " has_end_locator=" << has_end_locator;
+    std::move(callback).Run(MakeErrorResult(
+        "시작과 끝 모두 로케이터이거나 모두 좌표여야 합니다. 혼합 사용은 지원하지 않습니다."));
+    return;
+  }
+
   if (has_start_locator && has_end_locator) {
     // 로케이터 모드: start/end 각각 ElementLocator 어댑터 파라미터 구성
 

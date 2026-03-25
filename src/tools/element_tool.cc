@@ -96,10 +96,10 @@ base::DictValue ElementTool::input_schema() const {
   // exact: 텍스트/이름 정확히 일치 여부
   base::DictValue exact_prop;
   exact_prop.Set("type", "boolean");
-  exact_prop.Set("default", true);
+  exact_prop.Set("default", false);
   exact_prop.Set("description",
                  "true이면 name/text 파라미터를 정확히 일치, "
-                 "false이면 부분 문자열 일치로 탐색 (기본: true).");
+                 "false이면 부분 문자열 일치로 탐색 (기본: false).");
   props.Set("exact", std::move(exact_prop));
 
   // properties: 조회할 속성 목록 (선택적; 생략 시 전체)
@@ -230,20 +230,60 @@ void ElementTool::OnLocated(std::shared_ptr<QueryContext> ctx,
     return;
   }
 
-  ctx->node_id = result->node_id;
-  if (ctx->node_id == 0) {
-    // node_id가 없으면 backend_node_id로 DOM.describeNode를 통해 nodeId 획득 필요.
-    // ElementLocator는 backendNodeId 기반이므로, nodeId가 0인 경우
-    // DOM.getBoxModel 등에는 backendNodeId를 사용한다.
-    // 여기서는 backend_node_id를 음수로 저장하여 구분 가능하게 한다.
-    // 실제로는 ElementLocator가 nodeId를 함께 반환하는지 확인 필요.
-    // ElementLocator::Result.node_id는 0이면 미사용이므로
-    // DOM 조회 시 backendNodeId 파라미터를 사용해야 한다.
-    ctx->node_id = result->backend_node_id;  // backendNodeId로 대체
+  int backend_id = result->backend_node_id;
+
+  if (result->node_id != 0) {
+    // selector/xpath 경로: DOM nodeId가 이미 있음
+    ctx->node_id = result->node_id;
+    LOG(INFO) << "[ElementTool] nodeId=" << ctx->node_id
+              << " backendNodeId=" << backend_id;
+    DispatchRequests(ctx);
+    return;
   }
 
-  LOG(INFO) << "[ElementTool] nodeId=" << ctx->node_id
-            << " backendNodeId=" << result->backend_node_id;
+  // AX Tree 경로(node_id==0): backendNodeId → DOM.describeNode → nodeId 획득
+  LOG(INFO) << "[ElementTool] AX 경로: backendNodeId=" << backend_id
+            << " → DOM.describeNode 호출";
+  base::DictValue params;
+  params.Set("backendNodeId", backend_id);
+  ctx->session->SendCdpCommand(
+      "DOM.describeNode", std::move(params),
+      base::BindOnce(&ElementTool::OnResolveNodeId,
+                     weak_factory_.GetWeakPtr(), ctx, backend_id));
+}
+
+// -----------------------------------------------------------------------
+// DOM.describeNode 응답 → nodeId 획득 후 DispatchRequests
+// -----------------------------------------------------------------------
+void ElementTool::OnResolveNodeId(std::shared_ptr<QueryContext> ctx,
+                                   int backend_node_id,
+                                   base::Value response) {
+  // 응답에서 nodeId 추출 시도
+  int resolved_node_id = 0;
+  if (response.is_dict()) {
+    const base::DictValue& d = response.GetDict();
+    const base::DictValue* node = nullptr;
+    if (const base::DictValue* r = d.FindDict("result")) {
+      node = r->FindDict("node");
+    }
+    if (!node) node = d.FindDict("node");
+    if (node) {
+      if (auto v = node->FindInt("nodeId")) {
+        resolved_node_id = *v;
+      }
+    }
+  }
+
+  if (resolved_node_id > 0) {
+    ctx->node_id = resolved_node_id;
+    LOG(INFO) << "[ElementTool] describeNode→nodeId=" << resolved_node_id
+              << " backendNodeId=" << backend_node_id;
+  } else {
+    // describeNode 실패 시 backendNodeId로 폴백 (CDP 명령 실패 가능성 있음)
+    ctx->node_id = backend_node_id;
+    LOG(WARNING) << "[ElementTool] describeNode에서 nodeId 획득 실패, "
+                 << "backendNodeId=" << backend_node_id << " 폴백 사용";
+  }
 
   DispatchRequests(ctx);
 }

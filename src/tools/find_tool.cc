@@ -413,7 +413,7 @@ void FindTool::OnFullAXTree(std::shared_ptr<SearchContext> ctx,
 }
 
 // ============================================================
-// ResolveAXEntries: 각 AXEntry에 대해 DOM.getBoxModel 요청
+// ResolveAXEntries: 각 AXEntry에 대해 DOM.describeNode 요청 (tag/attributes 획득)
 // ============================================================
 
 void FindTool::ResolveAXEntries(std::shared_ptr<SearchContext> ctx) {
@@ -429,12 +429,62 @@ void FindTool::ResolveAXEntries(std::shared_ptr<SearchContext> ctx) {
   for (size_t i = 0; i < n; ++i) {
     base::DictValue params;
     params.Set("backendNodeId", ctx->ax_entries[i].backend_node_id);
+    params.Set("depth", 0);
 
     ctx->session->SendCdpCommand(
-        "DOM.getBoxModel", std::move(params),
-        base::BindOnce(&FindTool::OnAXBoxModel,
+        "DOM.describeNode", std::move(params),
+        base::BindOnce(&FindTool::OnAXDescribeNode,
                        weak_factory_.GetWeakPtr(), ctx, i));
   }
+}
+
+// ============================================================
+// OnAXDescribeNode: AX 경로 DOM.describeNode 응답 → tag/attributes 추출 → getBoxModel
+// ============================================================
+
+void FindTool::OnAXDescribeNode(std::shared_ptr<SearchContext> ctx,
+                                size_t index,
+                                base::Value response) {
+  std::string tag;
+  base::DictValue attributes;
+
+  if (!HasCdpError(response)) {
+    const base::DictValue* dict = response.GetIfDict();
+    const base::DictValue* node = nullptr;
+    if (dict) {
+      if (const base::DictValue* r = dict->FindDict("result"))
+        node = r->FindDict("node");
+      if (!node)
+        node = dict->FindDict("node");
+    }
+
+    if (node) {
+      if (const std::string* v = node->FindString("localName"))
+        tag = *v;
+      else if (const std::string* v2 = node->FindString("nodeName"))
+        tag = base::ToLowerASCII(*v2);
+
+      // HTML 속성 파싱
+      if (const base::ListValue* attrs = node->FindList("attributes")) {
+        for (size_t ai = 0; ai + 1 < attrs->size(); ai += 2) {
+          const auto& k = (*attrs)[ai];
+          const auto& v = (*attrs)[ai + 1];
+          if (k.is_string() && v.is_string())
+            attributes.Set(k.GetString(), v.GetString());
+        }
+      }
+    }
+  }
+
+  // DOM.getBoxModel로 bounding box 획득
+  base::DictValue params;
+  params.Set("backendNodeId", ctx->ax_entries[index].backend_node_id);
+
+  ctx->session->SendCdpCommand(
+      "DOM.getBoxModel", std::move(params),
+      base::BindOnce(&FindTool::OnAXBoxModel,
+                     weak_factory_.GetWeakPtr(), ctx, index,
+                     std::move(tag), std::move(attributes)));
 }
 
 // ============================================================
@@ -443,6 +493,8 @@ void FindTool::ResolveAXEntries(std::shared_ptr<SearchContext> ctx) {
 
 void FindTool::OnAXBoxModel(std::shared_ptr<SearchContext> ctx,
                             size_t index,
+                            std::string tag,
+                            base::DictValue attributes,
                             base::Value response) {
   const SearchContext::AXEntry& entry = ctx->ax_entries[index];
 
@@ -484,9 +536,8 @@ void FindTool::OnAXBoxModel(std::shared_ptr<SearchContext> ctx,
     item.Set("boundingBox", base::DictValue());
   }
 
-  // tag 정보는 AX 경로에서는 별도 조회 없이 생략 (빈 문자열)
-  item.Set("tag", "");
-  item.Set("attributes", base::DictValue());
+  item.Set("tag", std::move(tag));
+  item.Set("attributes", std::move(attributes));
 
   if (index < ctx->items.size())
     ctx->items[index] = base::Value(std::move(item));

@@ -116,10 +116,10 @@ base::DictValue ScrollTool::input_schema() const {
   // exact: 텍스트/이름 정확히 일치 여부
   base::DictValue exact_prop;
   exact_prop.Set("type", "boolean");
-  exact_prop.Set("default", true);
+  exact_prop.Set("default", false);
   exact_prop.Set("description",
                  "true이면 name/text 파라미터를 정확히 일치, "
-                 "false이면 부분 문자열 일치로 탐색 (기본: true).");
+                 "false이면 부분 문자열 일치로 탐색 (기본: false).");
   properties.Set("exact", std::move(exact_prop));
 
   // direction: 스크롤 방향

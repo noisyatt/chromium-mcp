@@ -115,12 +115,19 @@ class FindTool : public McpTool {
                     bool is_role_search,
                     base::Value response);
 
-  // ax_entries 목록이 준비된 후 각 backendNodeId에 대해 getBoxModel 요청
+  // ax_entries 목록이 준비된 후 각 backendNodeId에 대해 describeNode 요청
   void ResolveAXEntries(std::shared_ptr<SearchContext> ctx);
+
+  // DOM.describeNode 응답 (AX 경로, 인덱스 i) → tag/attributes 추출 → getBoxModel
+  void OnAXDescribeNode(std::shared_ptr<SearchContext> ctx,
+                        size_t index,
+                        base::Value response);
 
   // DOM.getBoxModel 응답 (AX 경로, 인덱스 i)
   void OnAXBoxModel(std::shared_ptr<SearchContext> ctx,
                     size_t index,
+                    std::string tag,
+                    base::DictValue attributes,
                     base::Value response);
 
   // -----------------------------------------------------------------------

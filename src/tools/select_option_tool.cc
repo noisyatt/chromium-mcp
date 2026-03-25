@@ -67,8 +67,8 @@ std::string SelectOptionTool::name() const {
 
 std::string SelectOptionTool::description() const {
   return "드롭다운(<select>) 요소에서 옵션을 선택합니다. "
-         "role/name, text, selector 등 다양한 방법으로 요소를 찾을 수 있습니다. "
-         "value 또는 text로 단일 옵션을 선택하거나, "
+         "CSS selector로 요소를 지정합니다. "
+         "value 또는 optionText로 단일 옵션을 선택하거나, "
          "values 배열로 다중 선택할 수 있습니다. "
          "'change' 이벤트가 버블링되어 발생합니다.";
 }
@@ -79,60 +79,15 @@ base::DictValue SelectOptionTool::input_schema() const {
 
   base::DictValue properties;
 
-  // ---- 공통 로케이터 파라미터 ----
+  // ---- 로케이터 파라미터 (CSS selector만 지원) ----
+  // 이 도구는 JS evaluate 기반으로 동작하므로 CSS selector만 지원합니다.
+  // role/name/text/xpath/ref 등 비-selector 로케이터는 미지원.
 
-  // role: ARIA 역할
-  base::DictValue role_prop;
-  role_prop.Set("type", "string");
-  role_prop.Set("description",
-                "select 요소의 ARIA 역할 (일반적으로 \"combobox\"). "
-                "name 파라미터와 함께 사용합니다.");
-  properties.Set("role", std::move(role_prop));
-
-  // name: 접근성 이름
-  base::DictValue name_prop;
-  name_prop.Set("type", "string");
-  name_prop.Set("description",
-                "select 요소의 접근성 이름 (레이블 텍스트, aria-label 등). "
-                "role 파라미터와 함께 사용합니다.");
-  properties.Set("name", std::move(name_prop));
-
-  // text: 표시 텍스트 (select 요소의 표시 텍스트로 탐색)
-  base::DictValue text_locator_prop;
-  text_locator_prop.Set("type", "string");
-  text_locator_prop.Set("description",
-                        "select 요소를 찾기 위한 표시 텍스트. exact=false이면 부분 일치. "
-                        "주의: 옵션 텍스트 선택용 text 파라미터와 다릅니다.");
-  properties.Set("text", std::move(text_locator_prop));
-
-  // selector: select 요소의 CSS 셀렉터
+  // selector: select 요소의 CSS 셀렉터 (필수)
   base::DictValue selector_prop;
   selector_prop.Set("type", "string");
-  selector_prop.Set("description", "select 요소의 CSS 셀렉터 (예: \"select#country\", \"select[name='size']\")");
+  selector_prop.Set("description", "select 요소의 CSS 셀렉터 (예: \"select#country\", \"select[name='size']\"). 필수.");
   properties.Set("selector", std::move(selector_prop));
-
-  // xpath: XPath 표현식
-  base::DictValue xpath_prop;
-  xpath_prop.Set("type", "string");
-  xpath_prop.Set("description",
-                 "select 요소의 XPath 표현식.");
-  properties.Set("xpath", std::move(xpath_prop));
-
-  // ref: backendNodeId 참조
-  base::DictValue ref_prop;
-  ref_prop.Set("type", "string");
-  ref_prop.Set("description",
-               "접근성 스냅샷 또는 element 도구에서 얻은 요소 ref (backendNodeId).");
-  properties.Set("ref", std::move(ref_prop));
-
-  // exact: 텍스트/이름 정확히 일치 여부
-  base::DictValue exact_prop;
-  exact_prop.Set("type", "boolean");
-  exact_prop.Set("default", true);
-  exact_prop.Set("description",
-                 "true이면 name/text 파라미터를 정확히 일치, "
-                 "false이면 부분 문자열 일치로 탐색 (기본: true).");
-  properties.Set("exact", std::move(exact_prop));
 
   // ---- 옵션 선택 파라미터 ----
 

@@ -104,10 +104,10 @@ base::DictValue ElementInfoTool::input_schema() const {
   // exact: 텍스트/이름 정확히 일치 여부
   base::DictValue exact_prop;
   exact_prop.Set("type", "boolean");
-  exact_prop.Set("default", true);
+  exact_prop.Set("default", false);
   exact_prop.Set("description",
                  "true이면 name/text 파라미터를 정확히 일치, "
-                 "false이면 부분 문자열 일치로 탐색 (기본: true).");
+                 "false이면 부분 문자열 일치로 탐색 (기본: false).");
   properties.Set("exact", std::move(exact_prop));
 
   // ---- 조회 항목 선택 ----
@@ -270,60 +270,94 @@ void ElementInfoTool::FetchProperties(std::shared_ptr<QueryContext> ctx) {
             weak_factory_.GetWeakPtr(), ctx, check_done));
   }
 
-  // Runtime.evaluate 기반 property들
-  auto eval_property = [&](const std::string& prop_name,
-                            const std::string& js_expr) {
-    if (!ctx->properties.count(prop_name)) return;
+  // JS property (text, html, value, checked, visible) 처리
+  // AX Tree 경로(selector == "(locator)")에서는 CSS 선택자가 없으므로
+  // Runtime.evaluate 기반 조회를 스킵하고 경고를 결과에 포함한다.
+  const bool is_locator_path = (ctx->selector == "(locator)");
 
-    base::DictValue params;
-    params.Set("expression", js_expr);
-    params.Set("returnByValue", true);
-    params.Set("awaitPromise", false);
-
-    ctx->session->SendCdpCommand(
-        "Runtime.evaluate", std::move(params),
-        base::BindOnce(
-            [](base::WeakPtr<ElementInfoTool> tool,
-               std::shared_ptr<QueryContext> c,
-               std::function<void()> done,
-               const std::string& pname,
-               base::Value response) {
-              if (tool) {
-                tool->OnRuntimeEvaluateResponse(c, pname, std::move(response));
-              }
-              done();
-            },
-            weak_factory_.GetWeakPtr(), ctx, check_done, prop_name));
+  static constexpr const char* kJsProperties[] = {
+      kPropText, kPropHtml, kPropValue, kPropChecked, kPropVisible,
   };
 
-  // selector를 안전하게 이스케이프
-  std::string escaped_sel = ctx->selector;
-  std::string::size_type pos = 0;
-  while ((pos = escaped_sel.find("'", pos)) != std::string::npos) {
-    escaped_sel.replace(pos, 1, "\\'");
-    pos += 2;
-  }
-  const std::string sel_js = "document.querySelector('" + escaped_sel + "')";
+  if (is_locator_path) {
+    // JS property가 요청된 경우 경고 메시지 포함 후 pending 감소
+    bool has_js_prop = false;
+    for (const char* prop : kJsProperties) {
+      if (ctx->properties.count(prop)) {
+        has_js_prop = true;
+        break;
+      }
+    }
+    if (has_js_prop) {
+      ctx->result.Set(
+          "_warning",
+          "AX Tree 로케이터 경로에서는 text/html/value/checked/visible 조회를 "
+          "지원하지 않습니다. CSS 선택자(selector) 또는 ref 로케이터를 사용하세요.");
+    }
+    // JS property에 해당하는 pending 수 감소
+    for (const char* prop : kJsProperties) {
+      if (ctx->properties.count(prop)) {
+        check_done();
+      }
+    }
+  } else {
+    // selector 경로: Runtime.evaluate 기반 property 조회
+    auto eval_property = [&](const std::string& prop_name,
+                              const std::string& js_expr) {
+      if (!ctx->properties.count(prop_name)) return;
 
-  eval_property(kPropText,
-                "(" + sel_js + " ? " + sel_js + ".innerText : null)");
-  eval_property(kPropHtml,
-                "(" + sel_js + " ? " + sel_js + ".outerHTML : null)");
-  eval_property(kPropValue,
-                "(" + sel_js + " ? " + sel_js + ".value : null)");
-  eval_property(kPropChecked,
-                "(" + sel_js + " ? " + sel_js + ".checked : null)");
-  eval_property(
-      kPropVisible,
-      "(() => {"
-      "  const el = " + sel_js + ";"
-      "  if (!el) return false;"
-      "  const style = window.getComputedStyle(el);"
-      "  return style.display !== 'none' && "
-      "         style.visibility !== 'hidden' && "
-      "         style.opacity !== '0' && "
-      "         el.offsetWidth > 0 && el.offsetHeight > 0;"
-      "})()");
+      base::DictValue params;
+      params.Set("expression", js_expr);
+      params.Set("returnByValue", true);
+      params.Set("awaitPromise", false);
+
+      ctx->session->SendCdpCommand(
+          "Runtime.evaluate", std::move(params),
+          base::BindOnce(
+              [](base::WeakPtr<ElementInfoTool> tool,
+                 std::shared_ptr<QueryContext> c,
+                 std::function<void()> done,
+                 const std::string& pname,
+                 base::Value response) {
+                if (tool) {
+                  tool->OnRuntimeEvaluateResponse(c, pname,
+                                                   std::move(response));
+                }
+                done();
+              },
+              weak_factory_.GetWeakPtr(), ctx, check_done, prop_name));
+    };
+
+    // selector를 안전하게 이스케이프
+    std::string escaped_sel = ctx->selector;
+    std::string::size_type pos = 0;
+    while ((pos = escaped_sel.find("'", pos)) != std::string::npos) {
+      escaped_sel.replace(pos, 1, "\\'");
+      pos += 2;
+    }
+    const std::string sel_js =
+        "document.querySelector('" + escaped_sel + "')";
+
+    eval_property(kPropText,
+                  "(" + sel_js + " ? " + sel_js + ".innerText : null)");
+    eval_property(kPropHtml,
+                  "(" + sel_js + " ? " + sel_js + ".outerHTML : null)");
+    eval_property(kPropValue,
+                  "(" + sel_js + " ? " + sel_js + ".value : null)");
+    eval_property(kPropChecked,
+                  "(" + sel_js + " ? " + sel_js + ".checked : null)");
+    eval_property(
+        kPropVisible,
+        "(() => {"
+        "  const el = " + sel_js + ";"
+        "  if (!el) return false;"
+        "  const style = window.getComputedStyle(el);"
+        "  return style.display !== 'none' && "
+        "         style.visibility !== 'hidden' && "
+        "         style.opacity !== '0' && "
+        "         el.offsetWidth > 0 && el.offsetHeight > 0;"
+        "})()");
+  }
 }
 
 void ElementInfoTool::OnGetAttributesResponse(std::shared_ptr<QueryContext> ctx,
