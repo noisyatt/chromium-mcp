@@ -86,6 +86,8 @@ source_set("mcp") {
     # ========== 요소 탐색 ==========
     "tools/element_locator.cc",
     "tools/element_locator.h",
+    "tools/actionability_checker.cc",
+    "tools/actionability_checker.h",
 
     # ========== 요소/검색 도구 ==========
     "tools/element_tool.cc",
