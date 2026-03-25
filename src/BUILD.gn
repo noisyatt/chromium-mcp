@@ -36,6 +36,8 @@ source_set("mcp") {
     "tools/box_model_util.h",
 
     # ========== DOM/입력 도구 ==========
+    "tools/click_tool.cc",
+    "tools/click_tool.h",
     "tools/dom_tool.cc",
     "tools/dom_tool.h",
     "tools/javascript_tool.cc",

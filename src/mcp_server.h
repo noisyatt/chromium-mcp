@@ -214,22 +214,17 @@ class McpServer {
   // -----------------------------------------------------------------------
 
   // 기본 제공 MCP 도구들을 모두 등록.
-  // navigate, screenshot, page_content, evaluate, network_* 는 tool_registry_ 클래스 기반.
-  // click, fill, browser_info 는 레거시 인라인 유지 (Task 5,6,10에서 처리 예정).
+  // navigate, screenshot, page_content, evaluate, network_*, click 은 tool_registry_ 클래스 기반.
+  // fill, browser_info 는 레거시 인라인 유지 (Task 6,10에서 처리 예정).
   void RegisterBuiltinTools();
 
-  // 레거시 인라인 도구 등록 메서드 (click/fill/browser_info만 유지)
-  void RegisterClickTool();
+  // 레거시 인라인 도구 등록 메서드 (fill/browser_info만 유지)
   void RegisterFillTool();
   void RegisterBrowserInfoTool();
 
   // -----------------------------------------------------------------------
   // 도구 실행 핸들러 (내부 CDP 호출) — 레거시 유지분
   // -----------------------------------------------------------------------
-
-  // click 도구: CSS 선택자로 요소를 찾아 Input.dispatchMouseEvent 실행
-  void ExecuteClick(const base::DictValue& params,
-                    base::OnceCallback<void(base::Value)> callback);
 
   // fill 도구: 입력 필드에 값을 입력 (Runtime.evaluate 활용)
   void ExecuteFill(const base::DictValue& params,

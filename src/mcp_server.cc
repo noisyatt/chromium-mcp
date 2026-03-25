@@ -27,6 +27,7 @@
 #include "chrome/browser/mcp/tools/cookie_tool.h"
 #include "chrome/browser/mcp/tools/coverage_tool.h"
 #include "chrome/browser/mcp/tools/dialog_tool.h"
+#include "chrome/browser/mcp/tools/click_tool.h"
 #include "chrome/browser/mcp/tools/dom_tool.h"
 #include "chrome/browser/mcp/tools/download_tool.h"
 #include "chrome/browser/mcp/tools/drag_tool.h"
@@ -790,8 +791,7 @@ void McpServer::RegisterTool(McpToolDefinition tool_def) {
 }
 
 void McpServer::RegisterBuiltinTools() {
-  // ===== 레거시 인라인 도구 (click/fill/browser_info — Task 5,6,10에서 처리 예정) =====
-  RegisterClickTool();
+  // ===== 레거시 인라인 도구 (fill/browser_info — Task 6,10에서 처리 예정) =====
   RegisterFillTool();
   RegisterBrowserInfoTool();
 
@@ -815,6 +815,7 @@ void McpServer::RegisterBuiltinTools() {
   // TabsTool: 아래 브라우저 유틸 블록에서 이미 등록됨
 
   // 입력 도구
+  tool_registry_->RegisterTool(std::make_unique<ClickTool>());
   tool_registry_->RegisterTool(std::make_unique<KeyboardTool>());
   tool_registry_->RegisterTool(std::make_unique<MouseTool>());
   tool_registry_->RegisterTool(std::make_unique<ScrollTool>());
@@ -855,42 +856,6 @@ void McpServer::RegisterBuiltinTools() {
   // 브라우저 데이터
   tool_registry_->RegisterTool(std::make_unique<HistoryTool>());
   tool_registry_->RegisterTool(std::make_unique<BookmarkTool>());
-}
-
-void McpServer::RegisterClickTool() {
-  base::DictValue schema;
-  schema.Set("type", "object");
-
-  base::DictValue properties;
-  {
-    base::DictValue sel_prop;
-    sel_prop.Set("type", "string");
-    sel_prop.Set("description", "클릭할 요소의 CSS 선택자");
-    properties.Set("selector", std::move(sel_prop));
-
-    base::DictValue btn_prop;
-    btn_prop.Set("type", "string");
-    base::ListValue btn_enum;
-    btn_enum.Append("left");
-    btn_enum.Append("right");
-    btn_enum.Append("middle");
-    btn_prop.Set("enum", std::move(btn_enum));
-    btn_prop.Set("description", "마우스 버튼 (기본: left)");
-    properties.Set("button", std::move(btn_prop));
-  }
-  schema.Set("properties", std::move(properties));
-
-  base::ListValue required;
-  required.Append("selector");
-  schema.Set("required", std::move(required));
-
-  McpToolDefinition def;
-  def.name = "click";
-  def.description = "CSS 선택자로 지정한 요소를 클릭";
-  def.input_schema = std::move(schema);
-  def.handler = base::BindRepeating(&McpServer::ExecuteClick,
-                                     weak_factory_.GetWeakPtr());
-  RegisterTool(std::move(def));
 }
 
 void McpServer::RegisterFillTool() {
@@ -942,93 +907,8 @@ void McpServer::RegisterBrowserInfoTool() {
 // -----------------------------------------------------------------------
 // 도구 실행 핸들러 구현
 // navigate, screenshot, page_content, evaluate, network_capture,
-// network_requests, tabs 는 Phase 1 마이그레이션으로 tool_registry_ 클래스 기반으로 처리됨.
+// network_requests, tabs, click 은 tool_registry_ 클래스 기반으로 처리됨.
 // -----------------------------------------------------------------------
-
-void McpServer::ExecuteClick(const base::DictValue& params,
-                              base::OnceCallback<void(base::Value)> callback) {
-  McpSession* session = GetActiveSession();
-  if (!session) {
-    std::move(callback).Run(MakeErrorResult("활성 탭 세션이 없습니다."));
-    return;
-  }
-
-  const std::string* selector = params.FindString("selector");
-  if (!selector || selector->empty()) {
-    std::move(callback).Run(MakeErrorResult("selector가 필요합니다."));
-    return;
-  }
-
-  // JavaScript로 요소를 찾아 getBoundingClientRect() 실행.
-  // 좌표를 구한 후 Input.dispatchMouseEvent로 클릭 시뮬레이션.
-  // Runtime.enable 없이 Runtime.evaluate만 사용하여 탐지 최소화.
-  const std::string& sel = *selector;
-  std::string js = "(() => {"
-      "  const el = document.querySelector('" + sel + "');"
-      "  if (!el) return null;"
-      "  const r = el.getBoundingClientRect();"
-      "  return {x: r.left + r.width/2, y: r.top + r.height/2};"
-      "})()";
-
-  base::DictValue cdp_params;
-  cdp_params.Set("expression", js);
-  cdp_params.Set("returnByValue", true);
-
-  session->SendCdpCommand(
-      "Runtime.evaluate",
-      std::move(cdp_params),
-      base::BindOnce(
-          [](McpSession* session,
-             std::string button_str,
-             base::OnceCallback<void(base::Value)> callback,
-             std::optional<base::DictValue> result,
-             const std::string& error) {
-            if (!error.empty() || !result) {
-              std::move(callback).Run(
-                  MakeErrorResult("요소 위치 조회 실패: " + error));
-              return;
-            }
-            // 좌표 추출
-            const base::DictValue* inner = result->FindDict("result");
-            if (!inner) {
-              std::move(callback).Run(MakeErrorResult("결과 없음"));
-              return;
-            }
-            const base::DictValue* coords = inner->FindDict("value");
-            if (!coords) {
-              std::move(callback).Run(MakeErrorResult("요소를 찾을 수 없습니다."));
-              return;
-            }
-            std::optional<double> x = coords->FindDouble("x");
-            std::optional<double> y = coords->FindDouble("y");
-            if (!x || !y) {
-              std::move(callback).Run(MakeErrorResult("좌표 추출 실패"));
-              return;
-            }
-
-            // Input.dispatchMouseEvent로 mousedown → mouseup → click 시퀀스 전송
-            auto send_mouse_event = [&](const std::string& type) {
-              base::DictValue mouse_params;
-              mouse_params.Set("type", type);
-              mouse_params.Set("x", *x);
-              mouse_params.Set("y", *y);
-              mouse_params.Set("button", button_str);
-              mouse_params.Set("clickCount", 1);
-              session->SendCdpCommand(
-                  "Input.dispatchMouseEvent",
-                  std::move(mouse_params),
-                  base::BindOnce([](base::Value) {}));
-            };
-
-            send_mouse_event("mousePressed");
-            send_mouse_event("mouseReleased");
-
-            std::move(callback).Run(MakeTextResult("클릭 완료"));
-          },
-          session,
-          params.FindString("button") ? *params.FindString("button") : "left",
-          std::move(callback)));
-}
 
 void McpServer::ExecuteFill(const base::DictValue& params,
                              base::OnceCallback<void(base::Value)> callback) {
