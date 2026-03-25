@@ -163,6 +163,64 @@ send_msg(s, {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list', 'params': {}})
 tools = recv_msg(s)
 ```
 
+## 통합 로케이터 (요소 지정 방법)
+
+모든 요소 대상 도구(`click`, `fill`, `hover`, `scroll`, `drag`, `select_option`, `file_upload`, `find`, `wait`, `element`, `element_info`)에서 공통으로 사용 가능한 파라미터다.
+
+### 요소 찾기 방법 (우선순위 순)
+
+| 우선순위 | 파라미터 | 설명 | 예시 |
+|----------|----------|------|------|
+| 1 | `role` + `name` | ARIA 역할 + 접근성 이름 **(가장 권장)** | `{"role": "button", "name": "로그인"}` |
+| 2 | `text` | 요소 텍스트 내용 | `{"text": "로그인"}` |
+| 3 | `selector` | CSS 셀렉터 (기존 호환) | `{"selector": "#login-btn"}` |
+| 4 | `xpath` | XPath 표현식 | `{"xpath": "//button[@id='login']"}` |
+| 5 | `ref` | backendDOMNodeId 직접 지정 | `{"ref": 142}` |
+
+### 공통 옵션 파라미터
+
+| 파라미터 | 타입 | 기본값 | 설명 |
+|----------|------|--------|------|
+| `exact` | boolean | `false` | `false` = 부분 일치, `true` = 정확 일치 |
+| `timeout` | number | `5000` | auto-wait 최대 대기 시간(ms). `0`이면 즉시 실패 |
+| `force` | boolean | `false` | `true`면 가시성/활성화 체크를 스킵하고 강제 동작 |
+
+### auto-wait 동작
+
+- **DOM 미존재 시:** `timeout` 내에서 요소가 나타날 때까지 자동 재시도
+- **비가시 요소:** 자동으로 `scrollIntoView` 후 재시도
+- **애니메이션 중:** 좌표가 안정될 때까지 대기 후 동작
+
+### 하위 호환성
+
+- 기존 `selector` 파라미터는 그대로 동작 (변경 없음)
+- 새 파라미터(`role`, `name`, `text`, `exact`, `timeout`, `force`)는 전부 선택적
+- **동작 변화:** 기존에는 요소 미발견 시 즉시 에러, 이제는 기본 5초 대기 후 에러. 즉시 실패를 원하면 `timeout: 0` 지정
+
+### 사용 예시
+
+```python
+# role + name (권장) — 접근성 기반, 가장 견고함
+send_msg(s, {'jsonrpc':'2.0','id':20,'method':'tools/call','params':{
+    'name':'click','arguments':{'role':'button','name':'로그인'}
+}})
+
+# text — 텍스트로 버튼 찾기
+send_msg(s, {'jsonrpc':'2.0','id':21,'method':'tools/call','params':{
+    'name':'click','arguments':{'text':'로그인','exact':True}
+}})
+
+# ref — find 결과의 backendNodeId를 직접 사용
+send_msg(s, {'jsonrpc':'2.0','id':22,'method':'tools/call','params':{
+    'name':'click','arguments':{'ref':142}
+}})
+
+# timeout: 0 — 즉시 실패 (요소가 반드시 존재해야 할 때)
+send_msg(s, {'jsonrpc':'2.0','id':23,'method':'tools/call','params':{
+    'name':'element','arguments':{'selector':'.modal','timeout':0}
+}})
+```
+
 ## 사용 가능한 도구 (35개)
 
 ### 페이지 제어
@@ -175,19 +233,19 @@ tools = recv_msg(s)
 ### DOM 조작
 | 도구 | 설명 |
 |------|------|
-| `click` | CSS 선택자/ref 기반 클릭 |
-| `fill` | 입력 필드 값 입력 |
+| `click` | CSS 선택자/ref/role+name 기반 클릭 (통합 로케이터 지원) |
+| `fill` | 입력 필드 값 입력 (통합 로케이터 지원) |
 | `evaluate` | JavaScript 실행 |
-| `hover` | 요소 위에 마우스 올리기 |
-| `scroll` | 페이지/요소 스크롤 |
-| `drag` | 드래그 앤 드롭 |
-| `select_option` | 드롭다운 선택 |
+| `hover` | 요소 위에 마우스 올리기 (통합 로케이터 지원) |
+| `scroll` | 페이지/요소 스크롤 (통합 로케이터 지원) |
+| `drag` | 드래그 앤 드롭 (통합 로케이터 지원) |
+| `select_option` | 드롭다운 선택 (통합 로케이터 지원) |
 | `keyboard` | 키보드 입력 |
 | `mouse` | 마우스 이벤트 |
-| `element` | 요소 정보 조회 |
-| `element_info` | 요소 상세 정보 |
-| `find` | 텍스트/선택자로 요소 검색 |
-| `wait` | 요소/텍스트 대기 |
+| `element` | 요소 정보 조회 (통합 로케이터 지원) |
+| `element_info` | 요소 상세 정보 (통합 로케이터 지원) |
+| `find` | 텍스트/선택자/role로 요소 검색 (통합 로케이터 지원) |
+| `wait` | 요소/텍스트 대기 (통합 로케이터 지원) |
 
 ### 네트워크
 | 도구 | 설명 |

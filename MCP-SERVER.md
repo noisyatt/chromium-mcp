@@ -37,6 +37,26 @@ MCP handshake (initialize → initialized)
 브라우저 종료 시 McpServer::Shutdown()
 ```
 
+## 통합 로케이터 공통 파라미터
+
+아래 파라미터들은 요소를 대상으로 하는 모든 도구(`click`, `fill`, `hover`, `scroll`, `drag`, `select_option`, `file_upload`, `find`, `wait`, `element`, `element_info`)에서 공통으로 사용 가능하다.
+
+```json
+{
+  "role":     {"type": "string",  "description": "ARIA 역할 (button, link, textbox 등). name과 함께 사용"},
+  "name":     {"type": "string",  "description": "접근성 이름. role과 함께 사용"},
+  "text":     {"type": "string",  "description": "요소의 텍스트 내용"},
+  "selector": {"type": "string",  "description": "CSS 셀렉터 (기존 호환)"},
+  "xpath":    {"type": "string",  "description": "XPath 표현식"},
+  "ref":      {"type": "integer", "description": "backendDOMNodeId 직접 지정"},
+  "exact":    {"type": "boolean", "default": false,  "description": "true면 정확 일치, false(기본)면 부분 일치"},
+  "timeout":  {"type": "number",  "default": 5000,   "description": "auto-wait 최대 대기 시간(ms). 0이면 즉시 실패"},
+  "force":    {"type": "boolean", "default": false,  "description": "true면 가시성/actionability 체크 스킵"}
+}
+```
+
+**요소 지정 우선순위:** `role+name` > `text` > `selector` > `xpath` > `ref`
+
 ## 도구 목록
 
 ### 페이지 제어
@@ -106,8 +126,15 @@ MCP handshake (initialize → initialized)
   "inputSchema": {
     "type": "object",
     "properties": {
-      "selector": {"type": "string", "description": "CSS 선택자"},
-      "ref": {"type": "string", "description": "접근성 트리의 ref ID"},
+      "role":     {"type": "string",  "description": "ARIA 역할 (button, link 등). name과 함께 사용"},
+      "name":     {"type": "string",  "description": "접근성 이름. role과 함께 사용"},
+      "text":     {"type": "string",  "description": "요소 텍스트 내용"},
+      "selector": {"type": "string",  "description": "CSS 선택자"},
+      "xpath":    {"type": "string",  "description": "XPath 표현식"},
+      "ref":      {"type": "integer", "description": "backendDOMNodeId"},
+      "exact":    {"type": "boolean", "default": false},
+      "timeout":  {"type": "number",  "default": 5000},
+      "force":    {"type": "boolean", "default": false},
       "button": {"type": "string", "enum": ["left", "right", "middle"]},
       "waitForNavigation": {"type": "boolean", "default": false}
     }
@@ -123,9 +150,16 @@ MCP handshake (initialize → initialized)
   "inputSchema": {
     "type": "object",
     "properties": {
-      "selector": {"type": "string"},
-      "ref": {"type": "string"},
-      "value": {"type": "string"}
+      "role":     {"type": "string",  "description": "ARIA 역할 (textbox 등). name과 함께 사용"},
+      "name":     {"type": "string",  "description": "접근성 이름. role과 함께 사용"},
+      "text":     {"type": "string",  "description": "요소 텍스트 내용"},
+      "selector": {"type": "string",  "description": "CSS 선택자"},
+      "xpath":    {"type": "string",  "description": "XPath 표현식"},
+      "ref":      {"type": "integer", "description": "backendDOMNodeId"},
+      "exact":    {"type": "boolean", "default": false},
+      "timeout":  {"type": "number",  "default": 5000},
+      "force":    {"type": "boolean", "default": false},
+      "value": {"type": "string", "description": "입력할 값"}
     }
   }
 }
@@ -148,6 +182,228 @@ MCP handshake (initialize → initialized)
 ```
 
 내부 구현: `Runtime.evaluate` CDP 명령. 중요: `Runtime.enable`을 호출하지 않고 `Runtime.evaluate`만 직접 호출하여 탐지 신호 최소화.
+
+#### `hover`
+```json
+{
+  "name": "hover",
+  "description": "요소 위에 마우스 올리기",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "role":     {"type": "string"},
+      "name":     {"type": "string"},
+      "text":     {"type": "string"},
+      "selector": {"type": "string"},
+      "xpath":    {"type": "string"},
+      "ref":      {"type": "integer"},
+      "exact":    {"type": "boolean", "default": false},
+      "timeout":  {"type": "number",  "default": 5000},
+      "force":    {"type": "boolean", "default": false}
+    }
+  }
+}
+```
+
+#### `scroll`
+```json
+{
+  "name": "scroll",
+  "description": "페이지 또는 요소 스크롤",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "role":      {"type": "string"},
+      "name":      {"type": "string"},
+      "text":      {"type": "string"},
+      "selector":  {"type": "string"},
+      "xpath":     {"type": "string"},
+      "ref":       {"type": "integer"},
+      "exact":     {"type": "boolean", "default": false},
+      "timeout":   {"type": "number",  "default": 5000},
+      "force":     {"type": "boolean", "default": false},
+      "direction": {"type": "string", "enum": ["up", "down", "left", "right"]},
+      "distance":  {"type": "number", "description": "스크롤 픽셀 수"}
+    }
+  }
+}
+```
+
+#### `drag`
+```json
+{
+  "name": "drag",
+  "description": "드래그 앤 드롭",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "role":           {"type": "string",  "description": "소스 요소 ARIA 역할"},
+      "name":           {"type": "string",  "description": "소스 요소 접근성 이름"},
+      "text":           {"type": "string",  "description": "소스 요소 텍스트"},
+      "selector":       {"type": "string",  "description": "소스 요소 CSS 선택자"},
+      "xpath":          {"type": "string",  "description": "소스 요소 XPath"},
+      "ref":            {"type": "integer", "description": "소스 요소 backendDOMNodeId"},
+      "exact":          {"type": "boolean", "default": false},
+      "timeout":        {"type": "number",  "default": 5000},
+      "force":          {"type": "boolean", "default": false},
+      "targetSelector": {"type": "string",  "description": "드롭 대상 CSS 선택자"},
+      "targetRef":      {"type": "integer", "description": "드롭 대상 backendDOMNodeId"}
+    }
+  }
+}
+```
+
+#### `select_option`
+```json
+{
+  "name": "select_option",
+  "description": "드롭다운(select) 옵션 선택",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "role":     {"type": "string"},
+      "name":     {"type": "string"},
+      "text":     {"type": "string"},
+      "selector": {"type": "string"},
+      "xpath":    {"type": "string"},
+      "ref":      {"type": "integer"},
+      "exact":    {"type": "boolean", "default": false},
+      "timeout":  {"type": "number",  "default": 5000},
+      "force":    {"type": "boolean", "default": false},
+      "value":    {"type": "string",  "description": "선택할 option value"},
+      "label":    {"type": "string",  "description": "선택할 option 표시 텍스트"}
+    }
+  }
+}
+```
+
+#### `file_upload`
+```json
+{
+  "name": "file_upload",
+  "description": "파일 업로드 input에 파일 지정",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "role":     {"type": "string"},
+      "name":     {"type": "string"},
+      "text":     {"type": "string"},
+      "selector": {"type": "string"},
+      "xpath":    {"type": "string"},
+      "ref":      {"type": "integer"},
+      "exact":    {"type": "boolean", "default": false},
+      "timeout":  {"type": "number",  "default": 5000},
+      "force":    {"type": "boolean", "default": false},
+      "files":    {"type": "array", "items": {"type": "string"}, "description": "업로드할 파일 경로 목록"}
+    },
+    "required": ["files"]
+  }
+}
+```
+
+#### `find`
+```json
+{
+  "name": "find",
+  "description": "텍스트/선택자/role로 요소 검색",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "role":     {"type": "string"},
+      "name":     {"type": "string"},
+      "text":     {"type": "string"},
+      "selector": {"type": "string"},
+      "xpath":    {"type": "string"},
+      "ref":      {"type": "integer"},
+      "exact":    {"type": "boolean", "default": false},
+      "timeout":  {"type": "number",  "default": 5000}
+    }
+  }
+}
+```
+
+**반환 형식:**
+```json
+{
+  "total": 3,
+  "items": [
+    {
+      "index": 0,
+      "backendNodeId": 142,
+      "tag": "button",
+      "role": "button",
+      "name": "로그인",
+      "visible": true,
+      "enabled": true,
+      "boundingBox": {"x": 320, "y": 180, "width": 80, "height": 36},
+      "attributes": {"class": "btn-primary"}
+    }
+  ]
+}
+```
+
+#### `wait`
+```json
+{
+  "name": "wait",
+  "description": "요소 또는 텍스트가 나타날 때까지 대기",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "role":     {"type": "string"},
+      "name":     {"type": "string"},
+      "text":     {"type": "string"},
+      "selector": {"type": "string"},
+      "xpath":    {"type": "string"},
+      "ref":      {"type": "integer"},
+      "exact":    {"type": "boolean", "default": false},
+      "timeout":  {"type": "number",  "default": 5000}
+    }
+  }
+}
+```
+
+#### `element`
+```json
+{
+  "name": "element",
+  "description": "요소 정보 조회",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "role":     {"type": "string"},
+      "name":     {"type": "string"},
+      "text":     {"type": "string"},
+      "selector": {"type": "string"},
+      "xpath":    {"type": "string"},
+      "ref":      {"type": "integer"},
+      "exact":    {"type": "boolean", "default": false},
+      "timeout":  {"type": "number",  "default": 5000}
+    }
+  }
+}
+```
+
+#### `element_info`
+```json
+{
+  "name": "element_info",
+  "description": "요소 상세 정보 조회 (속성, 스타일, 접근성 포함)",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "role":     {"type": "string"},
+      "name":     {"type": "string"},
+      "text":     {"type": "string"},
+      "selector": {"type": "string"},
+      "xpath":    {"type": "string"},
+      "ref":      {"type": "integer"},
+      "exact":    {"type": "boolean", "default": false},
+      "timeout":  {"type": "number",  "default": 5000}
+    }
+  }
+}
+```
 
 ### 네트워크
 
