@@ -4,6 +4,7 @@
 
 #include "chrome/browser/mcp/tools/hover_tool.h"
 
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -11,121 +12,9 @@
 #include "base/logging.h"
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_session.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 
 namespace mcp {
-
-namespace {
-
-// MCP 성공 응답 Value 생성
-base::Value MakeSuccessResult(const std::string& message) {
-  base::DictValue result;
-  base::ListValue content;
-  base::DictValue item;
-  item.Set("type", "text");
-  item.Set("text", message);
-  content.Append(std::move(item));
-  result.Set("content", std::move(content));
-  result.Set("isError", false);
-  return base::Value(std::move(result));
-}
-
-// MCP 에러 응답 Value 생성
-base::Value MakeErrorResult(const std::string& message) {
-  base::DictValue result;
-  base::ListValue content;
-  base::DictValue item;
-  item.Set("type", "text");
-  item.Set("text", message);
-  content.Append(std::move(item));
-  result.Set("content", std::move(content));
-  result.Set("isError", true);
-  return base::Value(std::move(result));
-}
-
-// CDP 응답에 "error" 키가 있는지 확인한다.
-bool HasCdpError(const base::Value& response) {
-  const base::DictValue* dict = response.GetIfDict();
-  if (!dict) {
-    return true;
-  }
-  return dict->Find("error") != nullptr;
-}
-
-// CDP 응답에서 에러 메시지를 추출한다.
-std::string ExtractCdpErrorMessage(const base::Value& response) {
-  const base::DictValue* dict = response.GetIfDict();
-  if (!dict) {
-    return "CDP 응답이 Dict 형식이 아님";
-  }
-  const base::DictValue* error = dict->FindDict("error");
-  if (!error) {
-    return "알 수 없는 CDP 에러";
-  }
-  const std::string* msg = error->FindString("message");
-  if (!msg) {
-    return "에러 메시지 없음";
-  }
-  return *msg;
-}
-
-// DOM.getDocument 응답에서 rootNodeId를 추출한다.
-int ExtractRootNodeId(const base::Value& response) {
-  const base::DictValue* dict = response.GetIfDict();
-  const base::DictValue* result = dict ? dict->FindDict("result") : nullptr;
-  const base::DictValue* root = result ? result->FindDict("root") : nullptr;
-  if (!root) {
-    return -1;
-  }
-  std::optional<int> node_id = root->FindInt("nodeId");
-  return node_id.value_or(-1);
-}
-
-// DOM.querySelector 응답에서 nodeId를 추출한다.
-int ExtractNodeId(const base::Value& response) {
-  const base::DictValue* dict = response.GetIfDict();
-  if (!dict) {
-    return -1;
-  }
-  const base::DictValue* result = dict->FindDict("result");
-  if (!result) {
-    return -1;
-  }
-  std::optional<int> node_id = result->FindInt("nodeId");
-  return node_id.value_or(-1);
-}
-
-// DOM.getBoxModel 응답에서 content quad 중심 좌표를 계산한다.
-bool ExtractBoxModelCenter(const base::Value& response,
-                           double* out_x,
-                           double* out_y) {
-  const base::DictValue* dict = response.GetIfDict();
-  if (!dict) {
-    return false;
-  }
-  const base::DictValue* result = dict->FindDict("result");
-  if (!result) {
-    return false;
-  }
-  const base::DictValue* model = result->FindDict("model");
-  if (!model) {
-    return false;
-  }
-  const base::ListValue* content = model->FindList("content");
-  if (!content || content->size() < 8) {
-    return false;
-  }
-  // 4개 꼭짓점 좌표의 평균으로 중심점 계산
-  double sum_x = 0.0, sum_y = 0.0;
-  for (size_t i = 0; i < 8; i += 2) {
-    sum_x += (*content)[i].GetIfDouble().value_or(0.0);
-    sum_y += (*content)[i + 1].GetIfDouble().value_or(0.0);
-  }
-  *out_x = sum_x / 4.0;
-  *out_y = sum_y / 4.0;
-  return true;
-}
-
-}  // namespace
 
 // ============================================================
 // HoverTool 구현
@@ -140,7 +29,8 @@ std::string HoverTool::name() const {
 
 std::string HoverTool::description() const {
   return "요소 위에 마우스 커서를 위치시켜 호버 이벤트를 발생시킵니다. "
-         "selector로 CSS 셀렉터를 지정하거나, x/y 좌표를 직접 지정할 수 있습니다. "
+         "role/name, text, selector, xpath, ref 등 다양한 방법으로 요소를 찾거나, "
+         "x/y 좌표를 직접 지정할 수 있습니다. "
          "tooltip 표시, 드롭다운 메뉴 열기 등의 호버 인터랙션에 사용합니다.";
 }
 
@@ -150,7 +40,32 @@ base::DictValue HoverTool::input_schema() const {
 
   base::DictValue properties;
 
-  // selector: 호버할 요소의 CSS 셀렉터
+  // ---- 공통 로케이터 파라미터 ----
+
+  // role: ARIA 역할
+  base::DictValue role_prop;
+  role_prop.Set("type", "string");
+  role_prop.Set("description",
+                "호버할 요소의 ARIA 역할 (예: \"button\", \"link\"). "
+                "name 파라미터와 함께 사용하면 정확도가 높아집니다.");
+  properties.Set("role", std::move(role_prop));
+
+  // name: 접근성 이름
+  base::DictValue name_prop;
+  name_prop.Set("type", "string");
+  name_prop.Set("description",
+                "요소의 접근성 이름 (레이블 텍스트, aria-label 등). "
+                "role 파라미터와 함께 사용합니다.");
+  properties.Set("name", std::move(name_prop));
+
+  // text: 표시 텍스트
+  base::DictValue text_prop;
+  text_prop.Set("type", "string");
+  text_prop.Set("description",
+                "요소의 표시 텍스트로 탐색. exact=false이면 부분 일치 허용.");
+  properties.Set("text", std::move(text_prop));
+
+  // selector: CSS 셀렉터
   base::DictValue selector_prop;
   selector_prop.Set("type", "string");
   selector_prop.Set("description",
@@ -158,21 +73,44 @@ base::DictValue HoverTool::input_schema() const {
                     "지정 시 해당 요소의 중심 좌표에서 mouseMoved 이벤트가 발생합니다.");
   properties.Set("selector", std::move(selector_prop));
 
+  // xpath: XPath 표현식
+  base::DictValue xpath_prop;
+  xpath_prop.Set("type", "string");
+  xpath_prop.Set("description",
+                 "호버할 요소의 XPath 표현식 (예: \"//button[@id='ok']\").");
+  properties.Set("xpath", std::move(xpath_prop));
+
+  // ref: backendNodeId 참조
+  base::DictValue ref_prop;
+  ref_prop.Set("type", "string");
+  ref_prop.Set("description",
+               "접근성 스냅샷 또는 element 도구에서 얻은 요소 ref (backendNodeId).");
+  properties.Set("ref", std::move(ref_prop));
+
+  // exact: 텍스트/이름 정확히 일치 여부
+  base::DictValue exact_prop;
+  exact_prop.Set("type", "boolean");
+  exact_prop.Set("default", true);
+  exact_prop.Set("description",
+                 "true이면 name/text 파라미터를 정확히 일치, "
+                 "false이면 부분 문자열 일치로 탐색 (기본: true).");
+  properties.Set("exact", std::move(exact_prop));
+
   // x: 직접 좌표 지정 시 X 좌표
   base::DictValue x_prop;
   x_prop.Set("type", "number");
-  x_prop.Set("description", "호버 이벤트를 발생시킬 X 좌표 (픽셀). selector가 없을 때 사용.");
+  x_prop.Set("description", "호버 이벤트를 발생시킬 X 좌표 (픽셀). 로케이터가 없을 때 사용.");
   properties.Set("x", std::move(x_prop));
 
   // y: 직접 좌표 지정 시 Y 좌표
   base::DictValue y_prop;
   y_prop.Set("type", "number");
-  y_prop.Set("description", "호버 이벤트를 발생시킬 Y 좌표 (픽셀). selector가 없을 때 사용.");
+  y_prop.Set("description", "호버 이벤트를 발생시킬 Y 좌표 (픽셀). 로케이터가 없을 때 사용.");
   properties.Set("y", std::move(y_prop));
 
   schema.Set("properties", std::move(properties));
 
-  // selector 또는 x/y 중 하나 필요 (런타임 검증)
+  // 로케이터 또는 x/y 중 하나 필요 (런타임 검증)
   base::ListValue required;
   schema.Set("required", std::move(required));
 
@@ -182,11 +120,18 @@ base::DictValue HoverTool::input_schema() const {
 void HoverTool::Execute(const base::DictValue& arguments,
                         McpSession* session,
                         base::OnceCallback<void(base::Value)> callback) {
-  const std::string* selector = arguments.FindString("selector");
-  if (selector && !selector->empty()) {
-    // selector 모드: DOM 경로로 좌표 계산
-    LOG(INFO) << "[HoverTool] selector 모드: selector=" << *selector;
-    GetDocumentRoot(*selector, session, std::move(callback));
+  // 로케이터 파라미터가 있는지 확인
+  const bool has_locator =
+      arguments.FindString("role") || arguments.FindString("name") ||
+      arguments.FindString("text") || arguments.FindString("selector") ||
+      arguments.FindString("xpath") || arguments.FindString("ref");
+
+  if (has_locator) {
+    LOG(INFO) << "[HoverTool] 로케이터 모드";
+    locator_.Locate(
+        session, arguments,
+        base::BindOnce(&HoverTool::OnLocated, weak_factory_.GetWeakPtr(),
+                       session, std::move(callback)));
     return;
   }
 
@@ -195,14 +140,30 @@ void HoverTool::Execute(const base::DictValue& arguments,
   std::optional<double> y_opt = arguments.FindDouble("y");
 
   if (!x_opt.has_value() || !y_opt.has_value()) {
-    LOG(WARNING) << "[HoverTool] selector 또는 x/y 좌표 파라미터가 필요합니다.";
+    LOG(WARNING) << "[HoverTool] 로케이터 또는 x/y 좌표 파라미터가 필요합니다.";
     std::move(callback).Run(
-        MakeErrorResult("selector 또는 x/y 좌표 파라미터가 필요합니다."));
+        MakeErrorResult("로케이터(role/name/text/selector/xpath/ref) 또는 "
+                        "x/y 좌표 파라미터가 필요합니다."));
     return;
   }
 
   LOG(INFO) << "[HoverTool] 좌표 모드: x=" << *x_opt << " y=" << *y_opt;
   DispatchHover(*x_opt, *y_opt, session, std::move(callback));
+}
+
+// ElementLocator 콜백: 좌표 해상도 완료 후 호버 발송
+void HoverTool::OnLocated(McpSession* session,
+                          base::OnceCallback<void(base::Value)> callback,
+                          std::optional<ElementLocator::Result> result,
+                          std::string error) {
+  if (!error.empty()) {
+    LOG(WARNING) << "[HoverTool] ElementLocator 실패: " << error;
+    std::move(callback).Run(MakeErrorResult(error));
+    return;
+  }
+
+  LOG(INFO) << "[HoverTool] 호버 좌표: (" << result->x << ", " << result->y << ")";
+  DispatchHover(result->x, result->y, session, std::move(callback));
 }
 
 // 좌표로 직접 mouseMoved 이벤트 발송
@@ -225,119 +186,16 @@ void HoverTool::DispatchHover(double x,
                      std::move(callback)));
 }
 
-// selector 모드 Step 1: DOM.getDocument 호출
-void HoverTool::GetDocumentRoot(
-    const std::string& selector,
-    McpSession* session,
-    base::OnceCallback<void(base::Value)> callback) {
-  base::DictValue params;
-  params.Set("depth", 0);
-
-  session->SendCdpCommand(
-      "DOM.getDocument", std::move(params),
-      base::BindOnce(&HoverTool::OnGetDocumentRoot,
-                     weak_factory_.GetWeakPtr(),
-                     selector, session, std::move(callback)));
-}
-
-// selector 모드 Step 2: getDocument 응답 후 DOM.querySelector 호출
-void HoverTool::OnGetDocumentRoot(
-    const std::string& selector,
-    McpSession* session,
-    base::OnceCallback<void(base::Value)> callback,
-    base::Value response) {
-  if (HandleCdpError(response, "DOM.getDocument", callback)) {
-    return;
-  }
-
-  int root_node_id = ExtractRootNodeId(response);
-  if (root_node_id <= 0) {
-    LOG(ERROR) << "[HoverTool] DOM.getDocument 응답에서 rootNodeId를 찾을 수 없음";
-    std::move(callback).Run(MakeErrorResult("DOM 루트 노드 ID를 획득할 수 없습니다."));
-    return;
-  }
-
-  base::DictValue params;
-  params.Set("nodeId", root_node_id);
-  params.Set("selector", selector);
-
-  session->SendCdpCommand(
-      "DOM.querySelector", std::move(params),
-      base::BindOnce(&HoverTool::OnQuerySelector,
-                     weak_factory_.GetWeakPtr(),
-                     session, std::move(callback)));
-}
-
-// selector 모드 Step 3: querySelector 응답 후 DOM.getBoxModel 호출
-void HoverTool::OnQuerySelector(
-    McpSession* session,
-    base::OnceCallback<void(base::Value)> callback,
-    base::Value response) {
-  if (HandleCdpError(response, "DOM.querySelector", callback)) {
-    return;
-  }
-
-  int node_id = ExtractNodeId(response);
-  if (node_id <= 0) {
-    LOG(WARNING) << "[HoverTool] 셀렉터에 일치하는 요소를 찾을 수 없음";
-    std::move(callback).Run(MakeErrorResult("지정한 셀렉터에 일치하는 요소를 찾을 수 없습니다."));
-    return;
-  }
-
-  base::DictValue params;
-  params.Set("nodeId", node_id);
-
-  session->SendCdpCommand(
-      "DOM.getBoxModel", std::move(params),
-      base::BindOnce(&HoverTool::OnGetBoxModel,
-                     weak_factory_.GetWeakPtr(),
-                     session, std::move(callback)));
-}
-
-// selector 모드 Step 4: BoxModel에서 중심좌표 계산 후 호버 발송
-void HoverTool::OnGetBoxModel(
-    McpSession* session,
-    base::OnceCallback<void(base::Value)> callback,
-    base::Value response) {
-  if (HandleCdpError(response, "DOM.getBoxModel", callback)) {
-    return;
-  }
-
-  double x = 0.0, y = 0.0;
-  if (!ExtractBoxModelCenter(response, &x, &y)) {
-    LOG(ERROR) << "[HoverTool] BoxModel에서 중심 좌표를 추출할 수 없음";
-    std::move(callback).Run(MakeErrorResult("요소의 BoxModel 좌표를 계산할 수 없습니다."));
-    return;
-  }
-
-  LOG(INFO) << "[HoverTool] 호버 좌표: (" << x << ", " << y << ")";
-  DispatchHover(x, y, session, std::move(callback));
-}
-
 // mouseMoved 완료 콜백
 void HoverTool::OnHoverDispatched(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
-  if (HandleCdpError(response, "Input.dispatchMouseEvent(mouseMoved)", callback)) {
+  if (mcp::HandleCdpError(response, "Input.dispatchMouseEvent(mouseMoved)",
+                           callback)) {
     return;
   }
   LOG(INFO) << "[HoverTool] 호버 완료";
   std::move(callback).Run(MakeSuccessResult("호버가 성공적으로 완료되었습니다."));
-}
-
-// 정적 헬퍼: CDP 에러 처리
-// NOLINTNEXTLINE(runtime/references)
-bool HoverTool::HandleCdpError(
-    const base::Value& response,
-    const std::string& step_name,
-    base::OnceCallback<void(base::Value)>& callback) {
-  if (!HasCdpError(response)) {
-    return false;
-  }
-  std::string error_msg = ExtractCdpErrorMessage(response);
-  LOG(ERROR) << "[HoverTool] CDP 에러 (" << step_name << "): " << error_msg;
-  std::move(callback).Run(MakeErrorResult(step_name + " 실패: " + error_msg));
-  return true;
 }
 
 }  // namespace mcp

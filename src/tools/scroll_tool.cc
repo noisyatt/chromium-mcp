@@ -4,6 +4,7 @@
 
 #include "chrome/browser/mcp/tools/scroll_tool.h"
 
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -11,6 +12,7 @@
 #include "base/logging.h"
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_session.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 
 namespace mcp {
 
@@ -18,115 +20,6 @@ namespace {
 
 // 한 틱당 픽셀 수 (마우스 휠 한 눈금 = 120px)
 constexpr double kScrollPixelsPerTick = 120.0;
-
-// MCP 성공 응답 Value 생성
-base::Value MakeSuccessResult(const std::string& message) {
-  base::DictValue result;
-  base::ListValue content;
-  base::DictValue item;
-  item.Set("type", "text");
-  item.Set("text", message);
-  content.Append(std::move(item));
-  result.Set("content", std::move(content));
-  result.Set("isError", false);
-  return base::Value(std::move(result));
-}
-
-// MCP 에러 응답 Value 생성
-base::Value MakeErrorResult(const std::string& message) {
-  base::DictValue result;
-  base::ListValue content;
-  base::DictValue item;
-  item.Set("type", "text");
-  item.Set("text", message);
-  content.Append(std::move(item));
-  result.Set("content", std::move(content));
-  result.Set("isError", true);
-  return base::Value(std::move(result));
-}
-
-// CDP 응답에 "error" 키가 있는지 확인한다.
-bool HasCdpError(const base::Value& response) {
-  const base::DictValue* dict = response.GetIfDict();
-  if (!dict) {
-    return true;
-  }
-  return dict->Find("error") != nullptr;
-}
-
-// CDP 응답에서 에러 메시지를 추출한다.
-std::string ExtractCdpErrorMessage(const base::Value& response) {
-  const base::DictValue* dict = response.GetIfDict();
-  if (!dict) {
-    return "CDP 응답이 Dict 형식이 아님";
-  }
-  const base::DictValue* error = dict->FindDict("error");
-  if (!error) {
-    return "알 수 없는 CDP 에러";
-  }
-  const std::string* msg = error->FindString("message");
-  if (!msg) {
-    return "에러 메시지 없음";
-  }
-  return *msg;
-}
-
-// DOM.getDocument 응답에서 rootNodeId를 추출한다.
-int ExtractRootNodeId(const base::Value& response) {
-  const base::DictValue* dict = response.GetIfDict();
-  const base::DictValue* result = dict ? dict->FindDict("result") : nullptr;
-  const base::DictValue* root = result ? result->FindDict("root") : nullptr;
-  if (!root) {
-    return -1;
-  }
-  std::optional<int> node_id = root->FindInt("nodeId");
-  return node_id.value_or(-1);
-}
-
-// DOM.querySelector 응답에서 nodeId를 추출한다.
-int ExtractNodeId(const base::Value& response) {
-  const base::DictValue* dict = response.GetIfDict();
-  if (!dict) {
-    return -1;
-  }
-  const base::DictValue* result = dict->FindDict("result");
-  if (!result) {
-    return -1;
-  }
-  std::optional<int> node_id = result->FindInt("nodeId");
-  return node_id.value_or(-1);
-}
-
-// DOM.getBoxModel 응답에서 content quad의 중심 좌표를 계산한다.
-bool ExtractBoxModelCenter(const base::Value& response,
-                           double* out_x,
-                           double* out_y) {
-  const base::DictValue* dict = response.GetIfDict();
-  if (!dict) {
-    return false;
-  }
-  const base::DictValue* result = dict->FindDict("result");
-  if (!result) {
-    return false;
-  }
-  const base::DictValue* model = result->FindDict("model");
-  if (!model) {
-    return false;
-  }
-  const base::ListValue* content = model->FindList("content");
-  if (!content || content->size() < 8) {
-    return false;
-  }
-  // 4개 꼭짓점 좌표의 평균으로 중심점 계산
-  double sum_x = 0.0, sum_y = 0.0;
-  for (size_t i = 0; i < 8; i += 2) {
-    sum_x += (*content)[i].GetIfDouble().value_or(0.0);
-    sum_y += (*content)[i + 1].GetIfDouble().value_or(0.0);
-  }
-  *out_x = sum_x / 4.0;
-  *out_y = sum_y / 4.0;
-  return true;
-}
 
 // direction 문자열과 amount 틱 수를 deltaX/deltaY로 변환한다.
 // CDP mouseWheel: deltaY 양수=위, 음수=아래 (브라우저 표준과 반대)
@@ -164,7 +57,7 @@ std::string ScrollTool::name() const {
 std::string ScrollTool::description() const {
   return "페이지 또는 특정 요소에서 스크롤을 발생시킵니다. "
          "direction(up/down/left/right)과 amount(틱 수)로 간편하게 스크롤하거나, "
-         "selector로 특정 요소 내부를 스크롤할 수 있습니다. "
+         "role/name, text, selector 등으로 특정 요소 내부를 스크롤할 수 있습니다. "
          "toTop/toBottom으로 페이지 맨 위/아래로 즉시 이동할 수 있습니다.";
 }
 
@@ -173,6 +66,61 @@ base::DictValue ScrollTool::input_schema() const {
   schema.Set("type", "object");
 
   base::DictValue properties;
+
+  // ---- 공통 로케이터 파라미터 ----
+
+  // role: ARIA 역할
+  base::DictValue role_prop;
+  role_prop.Set("type", "string");
+  role_prop.Set("description",
+                "스크롤할 요소의 ARIA 역할 (예: \"list\", \"region\"). "
+                "name 파라미터와 함께 사용합니다.");
+  properties.Set("role", std::move(role_prop));
+
+  // name: 접근성 이름
+  base::DictValue name_prop;
+  name_prop.Set("type", "string");
+  name_prop.Set("description",
+                "요소의 접근성 이름. role 파라미터와 함께 사용합니다.");
+  properties.Set("name", std::move(name_prop));
+
+  // text: 표시 텍스트
+  base::DictValue text_prop;
+  text_prop.Set("type", "string");
+  text_prop.Set("description",
+                "요소의 표시 텍스트로 탐색. exact=false이면 부분 일치 허용.");
+  properties.Set("text", std::move(text_prop));
+
+  // selector: 스크롤을 발생시킬 요소의 CSS 셀렉터
+  base::DictValue selector_prop;
+  selector_prop.Set("type", "string");
+  selector_prop.Set("description",
+                    "스크롤을 발생시킬 요소의 CSS 셀렉터. "
+                    "지정 시 해당 요소의 중심 좌표에서 스크롤 이벤트가 발생합니다.");
+  properties.Set("selector", std::move(selector_prop));
+
+  // xpath: XPath 표현식
+  base::DictValue xpath_prop;
+  xpath_prop.Set("type", "string");
+  xpath_prop.Set("description",
+                 "스크롤할 요소의 XPath 표현식.");
+  properties.Set("xpath", std::move(xpath_prop));
+
+  // ref: backendNodeId 참조
+  base::DictValue ref_prop;
+  ref_prop.Set("type", "string");
+  ref_prop.Set("description",
+               "접근성 스냅샷 또는 element 도구에서 얻은 요소 ref (backendNodeId).");
+  properties.Set("ref", std::move(ref_prop));
+
+  // exact: 텍스트/이름 정확히 일치 여부
+  base::DictValue exact_prop;
+  exact_prop.Set("type", "boolean");
+  exact_prop.Set("default", true);
+  exact_prop.Set("description",
+                 "true이면 name/text 파라미터를 정확히 일치, "
+                 "false이면 부분 문자열 일치로 탐색 (기본: true).");
+  properties.Set("exact", std::move(exact_prop));
 
   // direction: 스크롤 방향
   base::DictValue direction_prop;
@@ -228,14 +176,6 @@ base::DictValue ScrollTool::input_schema() const {
                    "수직 스크롤량 (픽셀). 양수: 위쪽, 음수: 아래쪽. "
                    "direction 파라미터가 없을 때 직접 지정. 기본값: -300.");
   properties.Set("deltaY", std::move(delta_y_prop));
-
-  // selector: 스크롤을 발생시킬 요소의 CSS 셀렉터
-  base::DictValue selector_prop;
-  selector_prop.Set("type", "string");
-  selector_prop.Set("description",
-                    "스크롤을 발생시킬 요소의 CSS 셀렉터. "
-                    "지정 시 해당 요소의 중심 좌표에서 스크롤 이벤트가 발생합니다.");
-  properties.Set("selector", std::move(selector_prop));
 
   // toTop: 페이지 맨 위로 스크롤
   base::DictValue to_top_prop;
@@ -305,12 +245,19 @@ void ScrollTool::Execute(const base::DictValue& arguments,
     delta_y = dy_opt.value_or(-300.0);
   }
 
-  // selector 지정 시: DOM 경로로 좌표 계산
-  const std::string* selector = arguments.FindString("selector");
-  if (selector && !selector->empty()) {
-    LOG(INFO) << "[ScrollTool] selector 모드: selector=" << *selector
-              << " deltaX=" << delta_x << " deltaY=" << delta_y;
-    GetDocumentRoot(*selector, delta_x, delta_y, session, std::move(callback));
+  // 로케이터 파라미터가 있는지 확인
+  const bool has_locator =
+      arguments.FindString("role") || arguments.FindString("name") ||
+      arguments.FindString("text") || arguments.FindString("selector") ||
+      arguments.FindString("xpath") || arguments.FindString("ref");
+
+  if (has_locator) {
+    LOG(INFO) << "[ScrollTool] 로케이터 모드: deltaX=" << delta_x
+              << " deltaY=" << delta_y;
+    locator_.Locate(
+        session, arguments,
+        base::BindOnce(&ScrollTool::OnLocated, weak_factory_.GetWeakPtr(),
+                       delta_x, delta_y, session, std::move(callback)));
     return;
   }
 
@@ -345,7 +292,7 @@ void ScrollTool::EvaluateScroll(const std::string& expression,
 void ScrollTool::OnEvaluateScroll(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
-  if (HandleCdpError(response, "Runtime.evaluate(scroll)", callback)) {
+  if (mcp::HandleCdpError(response, "Runtime.evaluate(scroll)", callback)) {
     return;
   }
   LOG(INFO) << "[ScrollTool] 페이지 스크롤 이동 완료";
@@ -374,130 +321,34 @@ void ScrollTool::DispatchScroll(double x,
                      std::move(callback)));
 }
 
-// selector 모드 Step 1: DOM.getDocument 호출
-void ScrollTool::GetDocumentRoot(
-    const std::string& selector,
-    double delta_x,
-    double delta_y,
-    McpSession* session,
-    base::OnceCallback<void(base::Value)> callback) {
-  base::DictValue params;
-  params.Set("depth", 0);
-
-  session->SendCdpCommand(
-      "DOM.getDocument", std::move(params),
-      base::BindOnce(&ScrollTool::OnGetDocumentRoot,
-                     weak_factory_.GetWeakPtr(),
-                     selector, delta_x, delta_y, session,
-                     std::move(callback)));
-}
-
-// selector 모드 Step 2: getDocument 응답 후 DOM.querySelector 호출
-void ScrollTool::OnGetDocumentRoot(
-    const std::string& selector,
-    double delta_x,
-    double delta_y,
-    McpSession* session,
-    base::OnceCallback<void(base::Value)> callback,
-    base::Value response) {
-  if (HandleCdpError(response, "DOM.getDocument", callback)) {
+// ElementLocator 콜백: 좌표 해상도 완료 후 스크롤 발송
+void ScrollTool::OnLocated(double delta_x,
+                           double delta_y,
+                           McpSession* session,
+                           base::OnceCallback<void(base::Value)> callback,
+                           std::optional<ElementLocator::Result> result,
+                           std::string error) {
+  if (!error.empty()) {
+    LOG(WARNING) << "[ScrollTool] ElementLocator 실패: " << error;
+    std::move(callback).Run(MakeErrorResult(error));
     return;
   }
 
-  int root_node_id = ExtractRootNodeId(response);
-  if (root_node_id <= 0) {
-    LOG(ERROR) << "[ScrollTool] DOM.getDocument 응답에서 rootNodeId를 찾을 수 없음";
-    std::move(callback).Run(MakeErrorResult("DOM 루트 노드 ID를 획득할 수 없습니다."));
-    return;
-  }
-
-  base::DictValue params;
-  params.Set("nodeId", root_node_id);
-  params.Set("selector", selector);
-
-  session->SendCdpCommand(
-      "DOM.querySelector", std::move(params),
-      base::BindOnce(&ScrollTool::OnQuerySelector,
-                     weak_factory_.GetWeakPtr(),
-                     delta_x, delta_y, session, std::move(callback)));
-}
-
-// selector 모드 Step 3: querySelector 응답 후 DOM.getBoxModel 호출
-void ScrollTool::OnQuerySelector(
-    double delta_x,
-    double delta_y,
-    McpSession* session,
-    base::OnceCallback<void(base::Value)> callback,
-    base::Value response) {
-  if (HandleCdpError(response, "DOM.querySelector", callback)) {
-    return;
-  }
-
-  int node_id = ExtractNodeId(response);
-  if (node_id <= 0) {
-    LOG(WARNING) << "[ScrollTool] 셀렉터에 일치하는 요소를 찾을 수 없음";
-    std::move(callback).Run(
-        MakeErrorResult("지정한 셀렉터에 일치하는 요소를 찾을 수 없습니다."));
-    return;
-  }
-
-  base::DictValue params;
-  params.Set("nodeId", node_id);
-
-  session->SendCdpCommand(
-      "DOM.getBoxModel", std::move(params),
-      base::BindOnce(&ScrollTool::OnGetBoxModel,
-                     weak_factory_.GetWeakPtr(),
-                     delta_x, delta_y, session, std::move(callback)));
-}
-
-// selector 모드 Step 4: BoxModel에서 중심좌표 계산 후 스크롤 발송
-void ScrollTool::OnGetBoxModel(
-    double delta_x,
-    double delta_y,
-    McpSession* session,
-    base::OnceCallback<void(base::Value)> callback,
-    base::Value response) {
-  if (HandleCdpError(response, "DOM.getBoxModel", callback)) {
-    return;
-  }
-
-  double x = 0.0, y = 0.0;
-  if (!ExtractBoxModelCenter(response, &x, &y)) {
-    LOG(ERROR) << "[ScrollTool] BoxModel에서 중심 좌표를 추출할 수 없음";
-    std::move(callback).Run(
-        MakeErrorResult("요소의 BoxModel 좌표를 계산할 수 없습니다."));
-    return;
-  }
-
-  LOG(INFO) << "[ScrollTool] 스크롤 좌표: (" << x << ", " << y << ")";
-  DispatchScroll(x, y, delta_x, delta_y, session, std::move(callback));
+  LOG(INFO) << "[ScrollTool] 스크롤 좌표: (" << result->x << ", " << result->y << ")";
+  DispatchScroll(result->x, result->y, delta_x, delta_y, session,
+                 std::move(callback));
 }
 
 // mouseWheel 완료 콜백
 void ScrollTool::OnScrollDispatched(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
-  if (HandleCdpError(response, "Input.dispatchMouseEvent(mouseWheel)", callback)) {
+  if (mcp::HandleCdpError(response, "Input.dispatchMouseEvent(mouseWheel)",
+                           callback)) {
     return;
   }
   LOG(INFO) << "[ScrollTool] 스크롤 완료";
   std::move(callback).Run(MakeSuccessResult("스크롤이 성공적으로 완료되었습니다."));
-}
-
-// 정적 헬퍼: CDP 에러 처리
-// NOLINTNEXTLINE(runtime/references)
-bool ScrollTool::HandleCdpError(
-    const base::Value& response,
-    const std::string& step_name,
-    base::OnceCallback<void(base::Value)>& callback) {
-  if (!HasCdpError(response)) {
-    return false;
-  }
-  std::string error_msg = ExtractCdpErrorMessage(response);
-  LOG(ERROR) << "[ScrollTool] CDP 에러 (" << step_name << "): " << error_msg;
-  std::move(callback).Run(MakeErrorResult(step_name + " 실패: " + error_msg));
-  return true;
 }
 
 }  // namespace mcp

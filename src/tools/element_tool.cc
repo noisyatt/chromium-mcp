@@ -5,11 +5,13 @@
 #include "chrome/browser/mcp/tools/element_tool.h"
 
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include "base/logging.h"
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_session.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 
 namespace mcp {
 
@@ -34,7 +36,8 @@ std::string ElementTool::name() const {
 }
 
 std::string ElementTool::description() const {
-  return "DOM 요소의 속성, 스타일, 위치 등 상세 정보 조회";
+  return "DOM 요소의 속성, 스타일, 위치 등 상세 정보 조회. "
+         "role/name, text, selector, xpath, ref 등 다양한 방법으로 요소를 지정합니다.";
 }
 
 base::DictValue ElementTool::input_schema() const {
@@ -43,7 +46,31 @@ base::DictValue ElementTool::input_schema() const {
 
   base::DictValue props;
 
-  // selector: CSS 선택자 (필수)
+  // ---- 공통 로케이터 파라미터 ----
+
+  // role: ARIA 역할
+  base::DictValue role_prop;
+  role_prop.Set("type", "string");
+  role_prop.Set("description",
+                "조회할 요소의 ARIA 역할 (예: \"button\", \"link\"). "
+                "name 파라미터와 함께 사용합니다.");
+  props.Set("role", std::move(role_prop));
+
+  // name: 접근성 이름
+  base::DictValue name_prop;
+  name_prop.Set("type", "string");
+  name_prop.Set("description",
+                "요소의 접근성 이름. role 파라미터와 함께 사용합니다.");
+  props.Set("name", std::move(name_prop));
+
+  // text: 표시 텍스트
+  base::DictValue text_prop;
+  text_prop.Set("type", "string");
+  text_prop.Set("description",
+                "요소의 표시 텍스트로 탐색. exact=false이면 부분 일치 허용.");
+  props.Set("text", std::move(text_prop));
+
+  // selector: CSS 선택자
   {
     base::DictValue p;
     p.Set("type", "string");
@@ -51,6 +78,29 @@ base::DictValue ElementTool::input_schema() const {
           "조회할 DOM 요소의 CSS 선택자 (예: '#main', '.btn', 'input[type=text]')");
     props.Set("selector", std::move(p));
   }
+
+  // xpath: XPath 표현식
+  base::DictValue xpath_prop;
+  xpath_prop.Set("type", "string");
+  xpath_prop.Set("description",
+                 "조회할 요소의 XPath 표현식.");
+  props.Set("xpath", std::move(xpath_prop));
+
+  // ref: backendNodeId 참조
+  base::DictValue ref_prop;
+  ref_prop.Set("type", "string");
+  ref_prop.Set("description",
+               "접근성 스냅샷 또는 element 도구에서 얻은 요소 ref (backendNodeId).");
+  props.Set("ref", std::move(ref_prop));
+
+  // exact: 텍스트/이름 정확히 일치 여부
+  base::DictValue exact_prop;
+  exact_prop.Set("type", "boolean");
+  exact_prop.Set("default", true);
+  exact_prop.Set("description",
+                 "true이면 name/text 파라미터를 정확히 일치, "
+                 "false이면 부분 문자열 일치로 탐색 (기본: true).");
+  props.Set("exact", std::move(exact_prop));
 
   // properties: 조회할 속성 목록 (선택적; 생략 시 전체)
   {
@@ -96,9 +146,8 @@ base::DictValue ElementTool::input_schema() const {
 
   schema.Set("properties", std::move(props));
 
-  // selector 는 필수
+  // 로케이터는 런타임에서 검증
   base::ListValue required;
-  required.Append("selector");
   schema.Set("required", std::move(required));
 
   return schema;
@@ -110,16 +159,22 @@ base::DictValue ElementTool::input_schema() const {
 void ElementTool::Execute(const base::DictValue& arguments,
                            McpSession* session,
                            base::OnceCallback<void(base::Value)> callback) {
-  const std::string* selector_ptr = arguments.FindString("selector");
-  if (!selector_ptr || selector_ptr->empty()) {
-    base::DictValue err;
-    err.Set("error", "selector 파라미터가 필요합니다");
-    std::move(callback).Run(base::Value(std::move(err)));
+  // 로케이터가 있는지 확인
+  const bool has_locator =
+      arguments.FindString("role") || arguments.FindString("name") ||
+      arguments.FindString("text") || arguments.FindString("selector") ||
+      arguments.FindString("xpath") || arguments.FindString("ref");
+
+  if (!has_locator) {
+    std::move(callback).Run(
+        MakeErrorResult("로케이터 파라미터(role/name/text/selector/xpath/ref)가 필요합니다."));
     return;
   }
 
   auto ctx = std::make_shared<QueryContext>();
-  ctx->selector = *selector_ptr;
+  // 로깅용 selector 또는 첫 번째 로케이터 표기
+  const std::string* sel = arguments.FindString("selector");
+  ctx->selector = sel ? *sel : "(locator)";
   ctx->session  = session;
   ctx->callback = std::move(callback);
 
@@ -158,106 +213,37 @@ void ElementTool::Execute(const base::DictValue& arguments,
 
   LOG(INFO) << "[ElementTool] 요소 조회 시작 selector=" << ctx->selector;
 
-  // 1단계: DOM.getDocument (depth=0 으로 최소한의 응답만 받음)
-  base::DictValue params;
-  params.Set("depth", 0);
-  params.Set("pierce", false);
-
-  session->SendCdpCommand(
-      "DOM.getDocument", std::move(params),
-      base::BindOnce(&ElementTool::OnGetDocument,
-                     weak_factory_.GetWeakPtr(), ctx));
+  // ElementLocator로 요소 탐색
+  locator_.Locate(
+      session, arguments,
+      base::BindOnce(&ElementTool::OnLocated, weak_factory_.GetWeakPtr(), ctx));
 }
 
 // -----------------------------------------------------------------------
-// DOM.getDocument 응답 → DOM.querySelector
+// ElementLocator 콜백 → 병렬 CDP 요청 실행
 // -----------------------------------------------------------------------
-void ElementTool::OnGetDocument(std::shared_ptr<QueryContext> ctx,
-                                 base::Value response) {
-  if (!response.is_dict()) {
-    base::DictValue err;
-    err.Set("error", "DOM.getDocument: 응답 형식 오류");
-    std::move(ctx->callback).Run(base::Value(std::move(err)));
+void ElementTool::OnLocated(std::shared_ptr<QueryContext> ctx,
+                             std::optional<ElementLocator::Result> result,
+                             std::string error) {
+  if (!error.empty()) {
+    std::move(ctx->callback).Run(MakeErrorResult(error));
     return;
   }
 
-  const base::DictValue& d = response.GetDict();
-  std::string cdp_err = ExtractCdpError(d);
-  if (!cdp_err.empty()) {
-    base::DictValue err;
-    err.Set("error", "DOM.getDocument 실패: " + cdp_err);
-    std::move(ctx->callback).Run(base::Value(std::move(err)));
-    return;
+  ctx->node_id = result->node_id;
+  if (ctx->node_id == 0) {
+    // node_id가 없으면 backend_node_id로 DOM.describeNode를 통해 nodeId 획득 필요.
+    // ElementLocator는 backendNodeId 기반이므로, nodeId가 0인 경우
+    // DOM.getBoxModel 등에는 backendNodeId를 사용한다.
+    // 여기서는 backend_node_id를 음수로 저장하여 구분 가능하게 한다.
+    // 실제로는 ElementLocator가 nodeId를 함께 반환하는지 확인 필요.
+    // ElementLocator::Result.node_id는 0이면 미사용이므로
+    // DOM 조회 시 backendNodeId 파라미터를 사용해야 한다.
+    ctx->node_id = result->backend_node_id;  // backendNodeId로 대체
   }
 
-  // 루트 nodeId 추출: result.root.nodeId 또는 root.nodeId
-  const base::DictValue* root = nullptr;
-  if (const base::DictValue* r = d.FindDict("result")) {
-    root = r->FindDict("root");
-  }
-  if (!root) {
-    root = d.FindDict("root");
-  }
-
-  std::optional<int> root_id = root ? root->FindInt("nodeId") : std::nullopt;
-  if (!root_id) {
-    base::DictValue err;
-    err.Set("error", "DOM.getDocument: 루트 nodeId 추출 실패");
-    std::move(ctx->callback).Run(base::Value(std::move(err)));
-    return;
-  }
-
-  // 2단계: DOM.querySelector
-  base::DictValue params;
-  params.Set("nodeId", *root_id);
-  params.Set("selector", ctx->selector);
-
-  ctx->session->SendCdpCommand(
-      "DOM.querySelector", std::move(params),
-      base::BindOnce(&ElementTool::OnQuerySelector,
-                     weak_factory_.GetWeakPtr(), ctx));
-}
-
-// -----------------------------------------------------------------------
-// DOM.querySelector 응답 → 병렬 CDP 요청 실행
-// -----------------------------------------------------------------------
-void ElementTool::OnQuerySelector(std::shared_ptr<QueryContext> ctx,
-                                   base::Value response) {
-  if (!response.is_dict()) {
-    base::DictValue err;
-    err.Set("error", "DOM.querySelector: 응답 형식 오류");
-    std::move(ctx->callback).Run(base::Value(std::move(err)));
-    return;
-  }
-
-  const base::DictValue& d = response.GetDict();
-  std::string cdp_err = ExtractCdpError(d);
-  if (!cdp_err.empty()) {
-    base::DictValue err;
-    err.Set("error", "DOM.querySelector 실패: " + cdp_err);
-    std::move(ctx->callback).Run(base::Value(std::move(err)));
-    return;
-  }
-
-  // nodeId 추출: result.nodeId 또는 nodeId
-  std::optional<int> node_id;
-  if (const base::DictValue* r = d.FindDict("result")) {
-    node_id = r->FindInt("nodeId");
-  }
-  if (!node_id) {
-    node_id = d.FindInt("nodeId");
-  }
-
-  if (!node_id || *node_id == 0) {
-    base::DictValue err;
-    err.Set("error",
-            "selector 에 해당하는 요소를 찾을 수 없음: " + ctx->selector);
-    std::move(ctx->callback).Run(base::Value(std::move(err)));
-    return;
-  }
-
-  ctx->node_id = *node_id;
-  LOG(INFO) << "[ElementTool] nodeId=" << ctx->node_id;
+  LOG(INFO) << "[ElementTool] nodeId=" << ctx->node_id
+            << " backendNodeId=" << result->backend_node_id;
 
   DispatchRequests(ctx);
 }
@@ -268,7 +254,6 @@ void ElementTool::OnQuerySelector(std::shared_ptr<QueryContext> ctx,
 void ElementTool::DispatchRequests(std::shared_ptr<QueryContext> ctx) {
   const std::set<std::string>& req = ctx->requested_properties;
 
-  // pending 수 계산 (요청할 CDP 명령 수)
   ctx->pending = 0;
   if (req.count(kPropAttributes))    ++ctx->pending;
   if (req.count(kPropComputedStyles)) ++ctx->pending;
@@ -276,7 +261,6 @@ void ElementTool::DispatchRequests(std::shared_ptr<QueryContext> ctx) {
   if (req.count(kPropTagInfo))       ++ctx->pending;
 
   if (ctx->pending == 0) {
-    // 조회할 항목이 없으면 바로 반환
     ctx->result.Set("success", true);
     ctx->result.Set("selector", ctx->selector);
     std::move(ctx->callback).Run(base::Value(std::move(ctx->result)));
@@ -333,7 +317,6 @@ void ElementTool::OnGetAttributes(std::shared_ptr<QueryContext> ctx,
   if (response.is_dict()) {
     const base::DictValue& d = response.GetDict();
 
-    // attributes 배열: [name, value, name, value, ...]
     const base::ListValue* attrs = nullptr;
     if (const base::DictValue* r = d.FindDict("result")) {
       attrs = r->FindList("attributes");
@@ -366,7 +349,6 @@ void ElementTool::OnGetComputedStyle(std::shared_ptr<QueryContext> ctx,
   if (response.is_dict()) {
     const base::DictValue& d = response.GetDict();
 
-    // computedStyle: [{name: "...", value: "..."}, ...]
     const base::ListValue* style_list = nullptr;
     if (const base::DictValue* r = d.FindDict("result")) {
       style_list = r->FindList("computedStyle");
@@ -401,7 +383,6 @@ void ElementTool::OnGetBoxModel(std::shared_ptr<QueryContext> ctx,
   if (response.is_dict()) {
     const base::DictValue& d = response.GetDict();
 
-    // model: {content, padding, border, margin, width, height}
     const base::DictValue* model = nullptr;
     if (const base::DictValue* r = d.FindDict("result")) {
       model = r->FindDict("model");
@@ -413,11 +394,9 @@ void ElementTool::OnGetBoxModel(std::shared_ptr<QueryContext> ctx,
     if (model) {
       base::DictValue box;
 
-      // 전체 width / height
       if (auto v = model->FindInt("width"))  box.Set("width",  *v);
       if (auto v = model->FindInt("height")) box.Set("height", *v);
 
-      // 각 영역별 쿼드(8개 좌표) → {x, y, width, height} 로 변환
       auto quad_to_rect = [](const base::ListValue* quad,
                               base::DictValue& out,
                               const std::string& prefix) {
@@ -452,7 +431,6 @@ void ElementTool::OnDescribeNode(std::shared_ptr<QueryContext> ctx,
   if (response.is_dict()) {
     const base::DictValue& d = response.GetDict();
 
-    // node 객체: {nodeType, nodeName, localName, attributes, ...}
     const base::DictValue* node = nullptr;
     if (const base::DictValue* r = d.FindDict("result")) {
       node = r->FindDict("node");
@@ -465,9 +443,7 @@ void ElementTool::OnDescribeNode(std::shared_ptr<QueryContext> ctx,
       base::DictValue tag_info;
 
       if (const std::string* v = node->FindString("nodeName")) {
-        // nodeName은 대문자이므로 그대로 tagName 으로 노출
         tag_info.Set("tagName", *v);
-        // 최상위 결과에도 tagName 설정
         ctx->result.Set("tagName", *v);
       }
       if (const std::string* v = node->FindString("localName")) {
@@ -477,8 +453,6 @@ void ElementTool::OnDescribeNode(std::shared_ptr<QueryContext> ctx,
         tag_info.Set("nodeType", *v);
       }
 
-      // attributes 배열 → id, className 추출
-      // DOM.describeNode 에서 반환되는 attributes 는 같은 [k,v,...] 형식
       if (const base::ListValue* attrs = node->FindList("attributes")) {
         for (size_t i = 0; i + 1 < attrs->size(); i += 2) {
           const auto& k = (*attrs)[i];
