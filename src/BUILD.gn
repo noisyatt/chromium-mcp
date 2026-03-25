@@ -149,8 +149,10 @@ source_set("mcp") {
     "//chrome/browser/history",
 
     # 북마크 모델 (bookmark_tool)
+    # bookmark_model_factory.h 는 //chrome/browser:browser (static_library)에 포함됨
+    # chrome/browser/bookmarks/ 디렉토리에는 BUILD.gn이 없으므로 //chrome/browser 사용
     "//components/bookmarks/browser",
-    "//chrome/browser/bookmarks",
+    "//chrome/browser",
 
     # 프로파일 (히스토리/북마크 팩토리 접근)
     "//chrome/browser/profiles",
