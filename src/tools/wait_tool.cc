@@ -397,7 +397,10 @@ void WaitTool::WaitForSelector(base::Value::Dict locator_params,
       FROM_HERE, base::Milliseconds(timeout_ms),
       base::BindOnce(&WaitTool::OnTimeout, weak_factory_.GetWeakPtr(), ctx));
 
-  // 폴링 타이머 시작 (per-request)
+  // 첫 폴링 즉시 실행 (interval 지연 없이)
+  OnSelectorPollTimer(ctx);
+
+  // 폴링 타이머 시작 (per-request): 이미 즉시 실행했으므로 interval 후부터 반복
   ctx->poll_timer.Start(
       FROM_HERE, base::Milliseconds(interval_ms),
       base::BindRepeating(&WaitTool::OnSelectorPollTimer,
@@ -478,7 +481,10 @@ void WaitTool::WaitForCondition(const std::string& js_expression,
       FROM_HERE, base::Milliseconds(timeout_ms),
       base::BindOnce(&WaitTool::OnTimeout, weak_factory_.GetWeakPtr(), ctx));
 
-  // per-request 폴링 타이머
+  // 첫 폴링 즉시 실행 (interval 지연 없이)
+  OnPollTimer(ctx);
+
+  // per-request 폴링 타이머: 이미 즉시 실행했으므로 interval 후부터 반복
   ctx->poll_timer.Start(
       FROM_HERE, base::Milliseconds(interval_ms),
       base::BindRepeating(&WaitTool::OnPollTimer,
@@ -735,16 +741,49 @@ void WaitTool::WaitForNetworkIdle(int timeout_ms,
           timeout_timer, idle_timer, pending_requests, completed,
           idle_time_ms, cb, session));
 
-  // Network.loadingFailed: 요청 실패도 완료로 처리
+  // Network.loadingFailed: 요청 실패도 완료로 처리 (idle 타이머 포함)
   session->RegisterCdpEventHandler(
       kLoadingFailedEvent,
       base::BindRepeating(
-          [](std::shared_ptr<int> pending,
+          [](std::shared_ptr<base::OneShotTimer> t_timer,
+             std::shared_ptr<base::OneShotTimer> i_timer,
+             std::shared_ptr<int> pending,
+             std::shared_ptr<bool> done,
+             int idle_ms,
+             std::shared_ptr<base::OnceCallback<void(base::Value)>> cb_ptr,
+             McpSession* sess,
              const std::string& /*event_name*/,
              const base::DictValue& /*params*/) {
+            if (*done) return;
             if (*pending > 0) (*pending)--;
+            LOG(INFO) << "[WaitTool] 네트워크 요청 실패, 진행 중=" << *pending;
+            if (*pending == 0) {
+              i_timer->Start(
+                  FROM_HERE, base::Milliseconds(idle_ms),
+                  base::BindOnce(
+                      [](std::shared_ptr<base::OneShotTimer> tt,
+                         std::shared_ptr<base::OneShotTimer> it,
+                         std::shared_ptr<bool> d,
+                         std::shared_ptr<base::OnceCallback<void(base::Value)>> c,
+                         McpSession* s) {
+                        if (*d) return;
+                        *d = true;
+                        s->UnregisterCdpEventHandler(kRequestWillBeSentEvent);
+                        s->UnregisterCdpEventHandler(kLoadingFinishedEvent);
+                        s->UnregisterCdpEventHandler(kLoadingFailedEvent);
+                        tt->Stop();
+                        it->Stop();
+                        LOG(INFO) << "[WaitTool] networkIdle 완료";
+                        base::DictValue result;
+                        result.Set("success", true);
+                        result.Set("message", "네트워크가 idle 상태가 되었습니다");
+                        std::move(*c).Run(base::Value(std::move(result)));
+                      },
+                      t_timer, i_timer, done, cb_ptr, sess));
+            }
           },
-          pending_requests));
+          timeout_timer, idle_timer, pending_requests, completed,
+          idle_time_ms, cb, session));
 
   // 전체 timeout 처리
   timeout_timer->Start(
