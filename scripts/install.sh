@@ -103,50 +103,129 @@ fi
 
 success "소스 파일 복사 완료 → ${MCP_TARGET}"
 
-# ─── 패치 적용 ───────────────────────────────────────────────────────────────
-if [[ "${SKIP_PATCHES}" == "true" ]]; then
-  warn "Git 저장소 미감지로 패치 적용을 건너뜁니다."
-  warn "아래 패치 파일을 수동으로 적용하세요:"
-  for patch in "${PATCHES_DIR}"/*.patch; do
-    [[ -f "${patch}" ]] && warn "  - ${patch}"
-  done
-else
-  info "패치 파일을 적용합니다..."
+# ─── 패치 적용 (직접 코드 삽입 방식) ──────────────────────────────────────────
+info "Chromium 소스에 MCP 통합 코드를 삽입합니다..."
 
-  # 패치 적용 실패 여부 추적
-  PATCH_FAILED=false
+PATCH_FAILED=false
 
-  # 패치 파일을 알파벳 순서로 적용 (적용 순서가 의존성에 영향을 줄 수 있음)
-  for patch in $(ls "${PATCHES_DIR}"/*.patch 2>/dev/null | sort); do
-    patch_name="$(basename "${patch}")"
-    info "  적용 중: ${patch_name}"
-
-    if (cd "${CHROMIUM_SRC}" && git apply --check "${patch}" 2>/dev/null); then
-      # 드라이런 성공 → 실제 적용
-      if (cd "${CHROMIUM_SRC}" && git apply "${patch}"); then
-        success "  패치 적용 성공: ${patch_name}"
-      else
-        warn "  패치 적용 실패: ${patch_name}"
-        PATCH_FAILED=true
-      fi
+# --- 1. chrome/browser/BUILD.gn : deps에 "//chrome/browser/mcp" 추가 ---
+BUILD_GN="${CHROMIUM_SRC}/chrome/browser/BUILD.gn"
+if [[ -f "${BUILD_GN}" ]]; then
+  if grep -q '//chrome/browser/mcp' "${BUILD_GN}"; then
+    success "  BUILD.gn: MCP 의존성 이미 존재"
+  else
+    # static_library("browser") 블록의 deps 안에서 "//chrome/browser/ui" 뒤에 삽입
+    if grep -q '"//chrome/browser/ui"' "${BUILD_GN}"; then
+      sed -i '' '/"\/\/chrome\/browser\/ui"/a\
+\    "//chrome/browser/mcp",
+' "${BUILD_GN}"
+      success "  BUILD.gn: MCP 의존성 추가 완료"
     else
-      warn "  패치 적용 불가 (이미 적용되었거나 충돌): ${patch_name}"
-      warn "  수동 확인 필요: ${patch}"
+      warn "  BUILD.gn: '//chrome/browser/ui' 패턴을 찾을 수 없습니다"
       PATCH_FAILED=true
     fi
-  done
-
-  if [[ "${PATCH_FAILED}" == "true" ]]; then
-    warn ""
-    warn "일부 패치가 자동 적용되지 않았습니다."
-    warn "patches/ 디렉토리의 .patch 파일을 참고하여 수동으로 변경사항을 적용하세요."
-    warn "주요 변경 위치:"
-    warn "  - chrome/browser/BUILD.gn       : deps에 '//chrome/browser/mcp' 추가"
-    warn "  - chrome/app/chrome_main_delegate.cc : InitializeMcpIfNeeded() 호출 추가"
-    warn "  - chrome/common/chrome_switches.h/cc : kMcpStdio, kMcpSocket 등록"
-  else
-    success "모든 패치 적용 완료"
   fi
+else
+  error "  BUILD.gn 파일을 찾을 수 없습니다: ${BUILD_GN}"
+  PATCH_FAILED=true
+fi
+
+# --- 2. chrome/common/chrome_switches.h : kMcpStdio, kMcpSocket 선언 ---
+SWITCHES_H="${CHROMIUM_SRC}/chrome/common/chrome_switches.h"
+if [[ -f "${SWITCHES_H}" ]]; then
+  if grep -q 'kMcpStdio' "${SWITCHES_H}"; then
+    success "  chrome_switches.h: MCP 스위치 이미 존재"
+  else
+    # "}  // namespace switches" 앞에 삽입
+    sed -i '' '/}  \/\/ namespace switches/i\
+\
+// MCP(Model Context Protocol) 서버 스위치 (chromium-mcp)\
+extern const char kMcpStdio[];\
+extern const char kMcpSocket[];
+' "${SWITCHES_H}"
+    success "  chrome_switches.h: MCP 스위치 선언 추가 완료"
+  fi
+else
+  error "  chrome_switches.h 파일을 찾을 수 없습니다"
+  PATCH_FAILED=true
+fi
+
+# --- 3. chrome/common/chrome_switches.cc : kMcpStdio, kMcpSocket 정의 ---
+SWITCHES_CC="${CHROMIUM_SRC}/chrome/common/chrome_switches.cc"
+if [[ -f "${SWITCHES_CC}" ]]; then
+  if grep -q 'kMcpStdio' "${SWITCHES_CC}"; then
+    success "  chrome_switches.cc: MCP 스위치 이미 존재"
+  else
+    sed -i '' '/}  \/\/ namespace switches/i\
+\
+// MCP(Model Context Protocol) 서버 스위치 정의 (chromium-mcp)\
+const char kMcpStdio[] = "mcp-stdio";\
+const char kMcpSocket[] = "mcp-socket";
+' "${SWITCHES_CC}"
+    success "  chrome_switches.cc: MCP 스위치 정의 추가 완료"
+  fi
+else
+  error "  chrome_switches.cc 파일을 찾을 수 없습니다"
+  PATCH_FAILED=true
+fi
+
+# --- 4. chrome/app/chrome_main_delegate.cc : MCP 초기화 코드 삽입 ---
+DELEGATE_CC="${CHROMIUM_SRC}/chrome/app/chrome_main_delegate.cc"
+if [[ -f "${DELEGATE_CC}" ]]; then
+  if grep -q 'InitializeMcpIfNeeded' "${DELEGATE_CC}"; then
+    success "  chrome_main_delegate.cc: MCP 초기화 코드 이미 존재"
+  else
+    # 4a. #include 추가 (파일 최상단 copyright 뒤, 첫 #include 앞)
+    sed -i '' '/#include "chrome\/app\/chrome_main_delegate.h"/i\
+#include "chrome/browser/mcp/mcp_server.h"\
+#include <cstdlib>
+' "${DELEGATE_CC}"
+
+    # 4b. InitializeMcpIfNeeded() 함수 정의 — "}  // namespace" 앞에 삽입
+    # 첫 번째 매칭만 처리 (익명 namespace 닫는 부분)
+    sed -i '' '0,/^}  \/\/ namespace$/s/^}  \/\/ namespace$/\
+void InitializeMcpIfNeeded() {\
+  auto* cmd = base::CommandLine::ForCurrentProcess();\
+  bool mcp_stdio = cmd->HasSwitch("mcp-stdio");\
+  bool mcp_env = (!!getenv("CHROMIUM_MCP"));\
+  std::string socket_path = cmd->GetSwitchValueASCII("mcp-socket");\
+  bool mcp_socket = !socket_path.empty();\
+  if (!mcp_stdio \&\& !mcp_env \&\& !mcp_socket) return;\
+  cmd->RemoveSwitch("mcp-stdio");\
+  cmd->RemoveSwitch("mcp-socket");\
+  unsetenv("CHROMIUM_MCP");\
+  auto* server = mcp::McpServer::GetInstance();\
+  if (mcp_stdio || mcp_env) {\
+    server->StartWithStdio();\
+  } else {\
+    server->StartWithSocket(socket_path);\
+  }\
+}\
+\
+}  \/\/ namespace/' "${DELEGATE_CC}"
+
+    # 4c. PostEarlyInitialization 함수 내에서 "return std::nullopt;" 앞에 호출 삽입
+    # 마지막 "return std::nullopt;" 앞에 삽입 (함수 끝)
+    # tac으로 역순 → 첫 번째 매칭 → 다시 역순
+    tac "${DELEGATE_CC}" | sed '0,/return std::nullopt;/{s/return std::nullopt;/return std::nullopt;\
+  \/\/ MCP 서버 조건부 초기화 (chromium-mcp)\
+  if (process_type.empty()) { InitializeMcpIfNeeded(); }/}' | tac > "${DELEGATE_CC}.tmp" && mv "${DELEGATE_CC}.tmp" "${DELEGATE_CC}"
+
+    success "  chrome_main_delegate.cc: MCP 초기화 코드 삽입 완료"
+  fi
+else
+  error "  chrome_main_delegate.cc 파일을 찾을 수 없습니다"
+  PATCH_FAILED=true
+fi
+
+if [[ "${PATCH_FAILED}" == "true" ]]; then
+  warn ""
+  warn "일부 패치가 자동 적용되지 않았습니다. 수동 확인 필요:"
+  warn "  - chrome/browser/BUILD.gn       : deps에 '//chrome/browser/mcp' 추가"
+  warn "  - chrome/app/chrome_main_delegate.cc : InitializeMcpIfNeeded() 호출 추가"
+  warn "  - chrome/common/chrome_switches.h/cc : kMcpStdio, kMcpSocket 등록"
+else
+  success "모든 MCP 통합 코드 삽입 완료"
 fi
 
 # ─── 완료 메시지 ─────────────────────────────────────────────────────────────
