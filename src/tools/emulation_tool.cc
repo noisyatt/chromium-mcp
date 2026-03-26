@@ -10,6 +10,7 @@
 #include "base/logging.h"
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_session.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 
 namespace mcp {
 
@@ -536,7 +537,11 @@ void EmulationTool::ExecuteNextCommand(std::unique_ptr<ExecuteContext> ctx,
               << ctx->applied.size() << "개 성공, "
               << ctx->errors.size() << "개 실패";
 
-    std::move(ctx->callback).Run(base::Value(std::move(result)));
+    if (ctx->errors.empty()) {
+      std::move(ctx->callback).Run(MakeJsonResult(std::move(result)));
+    } else {
+      std::move(ctx->callback).Run(base::Value(std::move(result)));
+    }
     return;
   }
 

@@ -14,6 +14,7 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_session.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 #include "chrome/browser/mcp/tools/element_locator.h"
 
 namespace mcp {
@@ -316,7 +317,7 @@ void WaitTool::WaitForTime(int duration_ms,
             result.Set("message",
                        std::to_string(dur_ms) + "ms 대기가 완료되었습니다");
             result.Set("durationMs", dur_ms);
-            std::move(*cb_ptr).Run(base::Value(std::move(result)));
+            std::move(*cb_ptr).Run(MakeJsonResult(std::move(result)));
           },
           timer, cb_ptr, duration_ms));
 }
@@ -452,7 +453,7 @@ void WaitTool::OnLocateResult(std::shared_ptr<WaitContext> ctx,
     res.Set("success", true);
     res.Set("elapsedMs", ctx->elapsed_ms);
     res.Set("condition", ctx->condition_label);
-    std::move(ctx->callback).Run(base::Value(std::move(res)));
+    std::move(ctx->callback).Run(MakeJsonResult(std::move(res)));
   }
   // 미충족: poll_timer 계속 실행
 }
@@ -548,7 +549,7 @@ void WaitTool::OnEvaluateResponse(std::shared_ptr<WaitContext> ctx,
     result.Set("success", true);
     result.Set("elapsedMs", ctx->elapsed_ms);
     result.Set("condition", ctx->condition_label);
-    std::move(ctx->callback).Run(base::Value(std::move(result)));
+    std::move(ctx->callback).Run(MakeJsonResult(std::move(result)));
   }
 }
 
@@ -605,7 +606,7 @@ void WaitTool::WaitForNavigation(int timeout_ms,
             base::DictValue result;
             result.Set("success", true);
             result.Set("message", "페이지 로드가 완료되었습니다");
-            std::move(*cb_ptr).Run(base::Value(std::move(result)));
+            std::move(*cb_ptr).Run(MakeJsonResult(std::move(result)));
           },
           timeout_timer, completed, cb, session));
 
@@ -672,12 +673,13 @@ void WaitTool::WaitForNetworkIdle(int timeout_ms,
       LOG(WARNING) << "[WaitTool] networkIdle 대기 timeout";
       result.Set("success", false);
       result.Set("error", "네트워크 idle 대기 시간이 초과되었습니다");
+      std::move(*cb_ptr).Run(base::Value(std::move(result)));
     } else {
       LOG(INFO) << "[WaitTool] networkIdle 완료";
       result.Set("success", true);
       result.Set("message", "네트워크가 idle 상태가 되었습니다");
+      std::move(*cb_ptr).Run(MakeJsonResult(std::move(result)));
     }
-    std::move(*cb_ptr).Run(base::Value(std::move(result)));
   };
 
   // Network.requestWillBeSent: 새 요청 시작
@@ -732,7 +734,7 @@ void WaitTool::WaitForNetworkIdle(int timeout_ms,
                         base::DictValue result;
                         result.Set("success", true);
                         result.Set("message", "네트워크가 idle 상태가 되었습니다");
-                        std::move(*c).Run(base::Value(std::move(result)));
+                        std::move(*c).Run(MakeJsonResult(std::move(result)));
                       },
                       t_timer, i_timer, done, cb_ptr, sess));
             }
@@ -776,7 +778,7 @@ void WaitTool::WaitForNetworkIdle(int timeout_ms,
                         base::DictValue result;
                         result.Set("success", true);
                         result.Set("message", "네트워크가 idle 상태가 되었습니다");
-                        std::move(*c).Run(base::Value(std::move(result)));
+                        std::move(*c).Run(MakeJsonResult(std::move(result)));
                       },
                       t_timer, i_timer, done, cb_ptr, sess));
             }

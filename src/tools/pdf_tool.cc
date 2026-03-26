@@ -12,6 +12,7 @@
 #include "base/logging.h"
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_session.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 
 namespace mcp {
 
@@ -360,7 +361,7 @@ void PdfTool::OnPrintToPdfResponse(
     result.Set("savePath", save_path);
     result.Set("size", static_cast<int>(pdf_bytes.size()));
     result.Set("mimeType", "application/pdf");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
 
@@ -371,7 +372,7 @@ void PdfTool::OnPrintToPdfResponse(
   result.Set("success", true);
   result.Set("data", *b64_data);  // base64 인코딩된 PDF
   result.Set("mimeType", "application/pdf");
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeJsonResult(std::move(result)));
 }
 
 }  // namespace mcp

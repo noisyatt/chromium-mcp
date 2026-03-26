@@ -81,6 +81,10 @@ bool McpSession::Attach() {
   SendCdpCommand("Page.enable", base::DictValue(),
                  base::BindOnce([](base::Value) {}));
 
+  // DOM 도메인 활성화 (DOM.performSearch 등 XPath 검색에 필요)
+  SendCdpCommand("DOM.enable", base::DictValue(),
+                 base::BindOnce([](base::Value) {}));
+
   return true;
 }
 

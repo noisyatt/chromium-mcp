@@ -11,6 +11,7 @@
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_session.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 
 namespace mcp {
 
@@ -143,7 +144,7 @@ void PageContentTool::OnAccessibilityTreeResponse(
     base::DictValue result;
     result.Set("mode", "accessibility");
     result.Set("nodes", base::ListValue());
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
 
@@ -151,7 +152,7 @@ void PageContentTool::OnAccessibilityTreeResponse(
   base::DictValue result;
   result.Set("mode", "accessibility");
   result.Set("nodes", nodes->Clone());
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeJsonResult(std::move(result)));
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -261,7 +262,7 @@ void PageContentTool::OnGetDocumentResponse(
                         base::DictValue result;
                         result.Set("mode", "html");
                         result.Set("html", html ? *html : "");
-                        std::move(done).Run(base::Value(std::move(result)));
+                        std::move(done).Run(MakeJsonResult(std::move(result)));
                       },
                       std::move(cb)));
             },
@@ -301,7 +302,7 @@ void PageContentTool::OnGetOuterHtmlResponse(
   base::DictValue result;
   result.Set("mode", "html");
   result.Set("html", html ? *html : "");
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeJsonResult(std::move(result)));
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -389,7 +390,7 @@ void PageContentTool::OnEvaluateResponse(
     base::DictValue result;
     result.Set("mode", "text");
     result.Set("text", "");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
 
@@ -402,7 +403,7 @@ void PageContentTool::OnEvaluateResponse(
     result.Set("mode", "text");
     result.Set("text", "");
     result.Set("warning", "해당 selector의 요소를 찾을 수 없음");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
 
@@ -414,7 +415,7 @@ void PageContentTool::OnEvaluateResponse(
   base::DictValue result;
   result.Set("mode", "text");
   result.Set("text", text);
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeJsonResult(std::move(result)));
 }
 
 }  // namespace mcp

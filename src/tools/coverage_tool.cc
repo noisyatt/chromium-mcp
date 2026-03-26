@@ -85,7 +85,7 @@ void CoverageTool::Execute(const base::DictValue& arguments,
   if (!action_ptr) {
     base::DictValue err;
     err.Set("error", "action 파라미터가 필요합니다");
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeJsonResult(std::move(err)));
     return;
   }
 
@@ -107,7 +107,7 @@ void CoverageTool::Execute(const base::DictValue& arguments,
   } else {
     base::DictValue err;
     err.Set("error", "알 수 없는 action: " + action);
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeJsonResult(std::move(err)));
   }
 }
 
@@ -122,7 +122,7 @@ void CoverageTool::ExecuteStartCSS(
     base::DictValue result;
     result.Set("success", false);
     result.Set("error", "CSS 추적이 이미 진행 중입니다. stopCSS를 먼저 호출하세요.");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
 
@@ -147,7 +147,7 @@ void CoverageTool::OnCssEnabled(
       base::DictValue result;
       result.Set("success", false);
       result.Set("error", msg ? *msg : "CSS.enable 실패");
-      std::move(callback).Run(base::Value(std::move(result)));
+      std::move(callback).Run(MakeJsonResult(std::move(result)));
       return;
     }
   }
@@ -171,7 +171,7 @@ void CoverageTool::OnCssTrackingStarted(
       base::DictValue result;
       result.Set("success", false);
       result.Set("error", msg ? *msg : "CSS.startRuleUsageTracking 실패");
-      std::move(callback).Run(base::Value(std::move(result)));
+      std::move(callback).Run(MakeJsonResult(std::move(result)));
       return;
     }
   }
@@ -200,7 +200,7 @@ void CoverageTool::ExecuteStopCSS(
     result.Set("success", false);
     result.Set("error",
                "CSS 추적이 시작되지 않았습니다. startCSS를 먼저 호출하세요.");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
 
@@ -232,7 +232,7 @@ void CoverageTool::OnCssTrackingStopped(
   if (!response.is_dict()) {
     base::DictValue result;
     result.Set("error", "예상치 못한 CDP 응답 형식");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
 
@@ -242,7 +242,7 @@ void CoverageTool::OnCssTrackingStopped(
     const std::string* msg = err->FindString("message");
     base::DictValue result;
     result.Set("error", msg ? *msg : "CSS.stopRuleUsageTracking 실패");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
 
@@ -251,7 +251,7 @@ void CoverageTool::OnCssTrackingStopped(
   if (!res) {
     base::DictValue result;
     result.Set("error", "CSS.stopRuleUsageTracking 응답에서 result를 찾을 수 없음");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
 
@@ -298,7 +298,7 @@ void CoverageTool::ExecuteStartJS(
     base::DictValue result;
     result.Set("success", false);
     result.Set("error", "JS 커버리지가 이미 진행 중입니다. stopJS를 먼저 호출하세요.");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
 
@@ -324,7 +324,7 @@ void CoverageTool::OnProfilerEnabled(
       base::DictValue result;
       result.Set("success", false);
       result.Set("error", msg ? *msg : "Profiler.enable 실패");
-      std::move(callback).Run(base::Value(std::move(result)));
+      std::move(callback).Run(MakeJsonResult(std::move(result)));
       return;
     }
   }
@@ -355,7 +355,7 @@ void CoverageTool::OnJsCoverageStarted(
       base::DictValue result;
       result.Set("success", false);
       result.Set("error", msg ? *msg : "Profiler.startPreciseCoverage 실패");
-      std::move(callback).Run(base::Value(std::move(result)));
+      std::move(callback).Run(MakeJsonResult(std::move(result)));
       return;
     }
   }
@@ -384,7 +384,7 @@ void CoverageTool::ExecuteStopJS(
     result.Set("success", false);
     result.Set("error",
                "JS 커버리지가 시작되지 않았습니다. startJS를 먼저 호출하세요.");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
 
@@ -419,7 +419,7 @@ void CoverageTool::OnJsCoverageTaken(
   if (!response.is_dict()) {
     base::DictValue result;
     result.Set("error", "예상치 못한 CDP 응답 형식");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
 
@@ -429,7 +429,7 @@ void CoverageTool::OnJsCoverageTaken(
     const std::string* msg = err->FindString("message");
     base::DictValue result;
     result.Set("error", msg ? *msg : "Profiler.takePreciseCoverage 실패");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
 
@@ -438,7 +438,7 @@ void CoverageTool::OnJsCoverageTaken(
   if (!outer_result) {
     base::DictValue result;
     result.Set("error", "takePreciseCoverage 응답에서 result를 찾을 수 없음");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
 
