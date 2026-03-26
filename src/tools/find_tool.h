@@ -69,6 +69,10 @@ class FindTool : public McpTool {
     struct AXEntry {
       AXEntry();
       ~AXEntry();
+      AXEntry(const AXEntry&);
+      AXEntry& operator=(const AXEntry&);
+      AXEntry(AXEntry&&);
+      AXEntry& operator=(AXEntry&&);
       int backend_node_id = 0;
       std::string role;
       std::string name;

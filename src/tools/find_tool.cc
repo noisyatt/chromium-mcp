@@ -28,6 +28,10 @@ FindTool::SearchContext::~SearchContext() = default;
 
 FindTool::SearchContext::AXEntry::AXEntry() = default;
 FindTool::SearchContext::AXEntry::~AXEntry() = default;
+FindTool::SearchContext::AXEntry::AXEntry(const AXEntry&) = default;
+FindTool::SearchContext::AXEntry& FindTool::SearchContext::AXEntry::operator=(const AXEntry&) = default;
+FindTool::SearchContext::AXEntry::AXEntry(AXEntry&&) = default;
+FindTool::SearchContext::AXEntry& FindTool::SearchContext::AXEntry::operator=(AXEntry&&) = default;
 
 // ============================================================
 // McpTool 인터페이스
