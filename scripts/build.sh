@@ -155,7 +155,7 @@ info "  빌드 디렉토리: ${BUILD_DIR}"
 # MCP 관련 플래그 활성화 + 기본 릴리스 설정
 DEFAULT_GN_ARGS=(
   "is_debug=false"
-  "is_component_build=true"           # 링킹 시간 대폭 단축 (dylib 분할)
+  "is_component_build=false"          # macOS에서 component build는 GUI 미동작 이슈
   "symbol_level=0"                    # 디버그 심볼 제거
   "blink_symbol_level=0"              # Blink 심볼도 제거
   "v8_symbol_level=0"                 # V8 심볼도 제거
@@ -193,7 +193,11 @@ echo ""
 
 BUILD_START=$(date +%s)
 
-if ! (cd "${CHROMIUM_SRC}" && ${NINJA_CMD} -C "${BUILD_DIR}" chrome); then
+# CPU 사용량 제한: CHROMIUM_BUILD_JOBS 환경변수 또는 코어수의 절반
+BUILD_JOBS="${CHROMIUM_BUILD_JOBS:-$(( $(sysctl -n hw.ncpu) / 2 ))}"
+info "  병렬 작업 수: -j${BUILD_JOBS} (전체 코어: $(sysctl -n hw.ncpu))"
+
+if ! (cd "${CHROMIUM_SRC}" && ${NINJA_CMD} -C "${BUILD_DIR}" -j"${BUILD_JOBS}" chrome); then
   error "빌드에 실패했습니다."
   error "위의 오류 메시지를 확인하세요."
   exit 1
