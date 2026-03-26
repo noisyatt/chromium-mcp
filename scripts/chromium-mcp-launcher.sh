@@ -348,6 +348,16 @@ launch_browser() {
 
     log "브라우저 실행: ${browser_bin} --mcp-socket=${socket_path}"
 
+    # Google API 키 로드 (CLI 실행 시에도 적용되도록)
+    local api_env="${HOME}/.chromium-mcp/google-api.env"
+    if [[ -f "${api_env}" ]]; then
+        while IFS='=' read -r key value; do
+            [[ -z "$key" || "$key" == \#* ]] && continue
+            export "${key}=${value}"
+        done < "${api_env}"
+        log "Google API 키 로드 완료"
+    fi
+
     # 브라우저를 백그라운드 독립 프로세스로 실행
     # nohup + disown 으로 현재 셸 종료 시 영향받지 않도록 분리
     nohup "${browser_bin}" \
