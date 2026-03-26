@@ -322,9 +322,15 @@ void McpSession::HandleCdpEvent(const std::string& method,
   }
 
   // 등록된 외부 이벤트 핸들러에도 이벤트를 전달한다.
+  // params가 nullptr인 경우에도 빈 DictValue를 전달하여 핸들러가 항상 호출되도록 함.
   auto handler_it = event_handlers_.find(method);
-  if (handler_it != event_handlers_.end() && params) {
-    handler_it->second.Run(method, *params);
+  if (handler_it != event_handlers_.end()) {
+    if (params) {
+      handler_it->second.Run(method, *params);
+    } else {
+      base::DictValue empty_params;
+      handler_it->second.Run(method, empty_params);
+    }
   }
 }
 

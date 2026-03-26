@@ -298,9 +298,9 @@ void JavaScriptTool::OnGetFrameTree(
     return;
   }
 
-  // 응답 구조: result.frameTree.frame.id
-  const base::DictValue* result = dict->FindDict("result");
-  const base::DictValue* frame_tree = result ? result->FindDict("frameTree") : nullptr;
+  // 편의 오버로드가 "result" 레벨을 이미 벗겨서 전달하므로
+  // dict = {"frameTree": {"frame": {"id": "..."}, ...}}
+  const base::DictValue* frame_tree = dict->FindDict("frameTree");
   const base::DictValue* frame = frame_tree ? frame_tree->FindDict("frame") : nullptr;
   const std::string* frame_id = frame ? frame->FindString("id") : nullptr;
 
@@ -353,10 +353,9 @@ void JavaScriptTool::OnIsolatedWorldCreated(
     return;
   }
 
-  // result.executionContextId 추출
-  const base::DictValue* result = dict->FindDict("result");
-  std::optional<int> context_id =
-      result ? result->FindInt("executionContextId") : std::nullopt;
+  // 편의 오버로드가 "result" 레벨을 이미 벗겨서 전달하므로
+  // dict = {"executionContextId": N}
+  std::optional<int> context_id = dict->FindInt("executionContextId");
 
   if (!context_id.has_value() || *context_id <= 0) {
     LOG(ERROR) << "[JavaScriptTool] IsolatedWorld executionContextId를 획득할 수 없음";
