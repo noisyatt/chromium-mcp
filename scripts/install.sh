@@ -252,6 +252,36 @@ else
   PATCH_FAILED=true
 fi
 
+# --- 5. chrome/browser/chrome_browser_main.cc : PostBrowserStart에 StartIfConfigured 추가 ---
+BROWSER_MAIN="${CHROMIUM_SRC}/chrome/browser/chrome_browser_main.cc"
+if [[ -f "${BROWSER_MAIN}" ]]; then
+  if grep -q 'StartIfConfigured' "${BROWSER_MAIN}"; then
+    success "  chrome_browser_main.cc: StartIfConfigured 이미 존재"
+  else
+    # #include 추가
+    if ! grep -q 'mcp_server.h' "${BROWSER_MAIN}"; then
+      sed -i '' '/#include "chrome\/browser\/browser_process.h"/a\
+#include "chrome/browser/mcp/mcp_server.h"
+' "${BROWSER_MAIN}"
+    fi
+    # PostBrowserStart 함수 끝에 StartIfConfigured 호출 추가
+    sed -i '' '/AfterStartupTaskUtils::StartMonitoringStartup();/a\
+\
+  // MCP 서버 지연 초기화 (chromium-mcp)\
+  mcp::McpServer::GetInstance()->StartIfConfigured();
+' "${BROWSER_MAIN}"
+    if grep -q 'StartIfConfigured' "${BROWSER_MAIN}"; then
+      success "  chrome_browser_main.cc: StartIfConfigured 추가 완료"
+    else
+      warn "  chrome_browser_main.cc: StartIfConfigured 삽입 실패"
+      PATCH_FAILED=true
+    fi
+  fi
+else
+  error "  chrome_browser_main.cc 파일을 찾을 수 없습니다"
+  PATCH_FAILED=true
+fi
+
 if [[ "${PATCH_FAILED}" == "true" ]]; then
   warn ""
   warn "일부 패치가 자동 적용되지 않았습니다. 수동 확인 필요:"
