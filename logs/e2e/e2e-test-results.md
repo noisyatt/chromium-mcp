@@ -11,11 +11,11 @@
 |-------|------|------|------|---------|------|
 | 1 | 기반 도구 5개 | 5 | 0 | 0 | 이전 세션 완료 |
 | 2 | 로케이터 핵심 11개 | 11 | 0 | 1 | element/element_info 수정 완료, drag partial |
-| 3 | 레거시 전환 3개 | 6 | 1 | 0 | isolatedWorld 프레임ID 에러 |
+| 3 | 레거시 전환 3개 | 7 | 0 | 0 | isolatedWorld 수정 완료 |
 | 4 | 입력 도구 2개 | 5 | 0 | 0 | |
 | 5 | 유틸리티 14개 | 14 | 0 | 1 | MakeJsonResult 래핑 수정, dialog confirm 부분적 |
 | 6 | 로케이터 특화 | 9 | 0 | 0 | dialog autoHandle 개선 (Page.enable) |
-| **합계** | **35 도구** | **50** | **1** | **2** | isolatedWorld 1 FAIL, drag/dialog partial |
+| **합계** | **35 도구** | **52** | **0** | **1** | drag HTML5 DnD만 partial (CDP 제약) |
 
 ## 세션 중 수정한 치명적 버그 (빌드 반영 완료)
 
