@@ -17,6 +17,42 @@
 | 6 | 로케이터 특화 | 9 | 0 | 0 | dialog autoHandle 개선 (Page.enable) |
 | **합계** | **35 도구** | **53** | **0** | **0** | 전체 통과 |
 
+## 브라우저 E2E 테스트 (test-page.html + 실제 웹사이트)
+
+### 실제 웹사이트 테스트 (Task 12)
+
+| Step | 대상 | 결과 |
+|------|------|------|
+| 1 | MCP 소켓 + 35개 도구 반환 | PASS |
+| 2 | Google — role/name 클릭 (Google 검색) | PASS |
+| 3 | Google — text 클릭 (Google 검색) | PASS |
+| 4 | Google — selector 호환 (input[name='btnK']) | PASS |
+| 5 | GitHub SPA — auto-wait + role/name (Repositories) | PASS |
+| 6 | GitHub — find 반환 필드 (role/name/visible/bbox) | PASS |
+
+### test-page.html 브라우저 테스트 (Section A~M)
+
+| Section | 테스트 | 결과 | 비고 |
+|---------|--------|------|------|
+| A | left/right/link click | 3/3 PASS | |
+| B | text/textarea/password/readonly | 4/4 PASS | readonly actionability 차단 |
+| C | single/multi select | 2/2 PASS | |
+| D | delayed/remove/animate | 3/3 PASS | |
+| E | drag & drop HTML5 | 1/1 PASS | 하이브리드 DnD |
+| F | hover | 1/1 PASS | |
+| G | toBottom/toTop/direction | 2/3 PASS | direction down이 file:// URL에서 미동작 |
+| H | alert/confirm/prompt | 3/3 PASS | autoHandle + 1s 대기 |
+| I | single/multi file upload | 2/2 PASS | |
+| J | link/searchbox/button a11y | 3/3 PASS | |
+| K | checkbox/radio | 0/2 FAIL | 13px 요소 클릭 좌표 정확도 제약 |
+| L | download link 탐색 | 1/1 PASS | |
+| M | visible 우선 (duplicate) | 1/1 PASS | |
+| **합계** | | **26/29 PASS** | 3 FAIL (scroll direction, 작은 체크박스/라디오) |
+
+### 알려진 제약
+1. **scroll direction**: CDP 마우스 휠 이벤트가 file:// URL에서 스크롤 미동작 (toTop/toBottom JS 방식은 정상)
+2. **작은 요소 클릭**: 13x13px 체크박스/라디오 — CDP 클릭 좌표 정확도 제약 (JS click()은 정상)
+
 ## 세션 중 수정한 치명적 버그 (빌드 반영 완료)
 
 ### BUG-1: javascript_tool.cc — evaluate 항상 "undefined" 반환
