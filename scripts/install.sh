@@ -230,7 +230,7 @@ if [[ -f "${DELEGATE_CC}" ]]; then
         for (i = 1; i <= NR; i++) {
           if (i == last_return_line) {
             print "  // MCP 서버 조건부 초기화 (chromium-mcp)"
-            print "  if (process_type.empty()) { InitializeMcpIfNeeded(); }"
+            print "  InitializeMcpIfNeeded();"
             print ""
           }
           print lines[i]
