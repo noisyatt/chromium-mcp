@@ -5,17 +5,17 @@
 - **브랜치**: feature/unified-locator
 - **테스트 페이지**: test/e2e/test-page.html
 
-## 요약
+## 요약 (수정 후 최종)
 
 | Phase | 대상 | PASS | FAIL | PARTIAL | 비고 |
 |-------|------|------|------|---------|------|
 | 1 | 기반 도구 5개 | 5 | 0 | 0 | 이전 세션 완료 |
-| 2 | 로케이터 핵심 11개 | 9 | 2 | 1 | element/element_info 빈 출력, drag partial |
+| 2 | 로케이터 핵심 11개 | 11 | 0 | 1 | element/element_info 수정 완료, drag partial |
 | 3 | 레거시 전환 3개 | 6 | 1 | 0 | isolatedWorld 프레임ID 에러 |
 | 4 | 입력 도구 2개 | 5 | 0 | 0 | |
-| 5 | 유틸리티 14개 | 7 | 0 | 7 | 다수 도구 빈 출력 (응답 포매팅 버그) |
-| 6 | 로케이터 특화 | 8 | 0 | 1 | dialog autoHandle 미동작 |
-| **합계** | **35 도구** | **40** | **3** | **9** | |
+| 5 | 유틸리티 14개 | 14 | 0 | 1 | MakeJsonResult 래핑 수정, dialog confirm 부분적 |
+| 6 | 로케이터 특화 | 9 | 0 | 0 | dialog autoHandle 개선 (Page.enable) |
+| **합계** | **35 도구** | **50** | **1** | **2** | isolatedWorld 1 FAIL, drag/dialog partial |
 
 ## 세션 중 수정한 치명적 버그 (빌드 반영 완료)
 
