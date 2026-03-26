@@ -95,17 +95,15 @@ void ElementLocator::LocateByRole(McpSession* session,
                                   bool exact,
                                   Callback callback) {
   if (exact || name.empty()) {
-    // exact 모드 또는 name 미지정: queryAXTree로 정확 매칭
-    base::DictValue params;
-    params.Set("role", role);
-    if (!name.empty()) {
-      params.Set("accessibleName", name);
-    }
+    // exact 모드 또는 name 미지정: DOM.getDocument로 루트 nodeId 획득 후
+    // queryAXTree에 nodeId 포함하여 호출 (Chromium 146 필수 파라미터)
+    base::DictValue doc_params;
+    doc_params.Set("depth", 0);
     session->SendCdpCommand(
-        "Accessibility.queryAXTree", std::move(params),
-        base::BindOnce(&ElementLocator::OnQueryAXTreeResponse,
+        "DOM.getDocument", std::move(doc_params),
+        base::BindOnce(&ElementLocator::OnGetDocumentForAXQueryByRole,
                        weak_factory_.GetWeakPtr(),
-                       session, std::move(callback)));
+                       session, role, name, std::move(callback)));
   } else {
     // exact:false + name 있음: getFullAXTree 후 role + name contains 필터
     session->SendCdpCommand(
@@ -114,6 +112,86 @@ void ElementLocator::LocateByRole(McpSession* session,
                        weak_factory_.GetWeakPtr(),
                        session, role, name, std::move(callback)));
   }
+}
+
+// ============================================================
+// OnGetDocumentForAXQueryByRole: DOM.getDocument 응답 → queryAXTree({nodeId, role, name})
+// ============================================================
+
+void ElementLocator::OnGetDocumentForAXQueryByRole(McpSession* session,
+                                                   const std::string& role,
+                                                   const std::string& name,
+                                                   Callback callback,
+                                                   base::Value response) {
+  if (HasCdpError(response)) {
+    std::string error_msg = ExtractCdpErrorMessage(response);
+    LOG(ERROR) << "[ElementLocator] DOM.getDocument 실패 (role 쿼리용): "
+               << error_msg;
+    std::move(callback).Run(std::nullopt,
+                            "DOM.getDocument 실패: " + error_msg);
+    return;
+  }
+
+  int root_node_id = ExtractRootNodeId(response);
+  if (root_node_id <= 0) {
+    std::move(callback).Run(std::nullopt,
+                            "DOM 루트 노드 ID를 획득할 수 없습니다");
+    return;
+  }
+
+  base::DictValue params;
+  params.Set("nodeId", root_node_id);
+  params.Set("role", role);
+  if (!name.empty()) {
+    params.Set("accessibleName", name);
+  }
+
+  LOG(INFO) << "[ElementLocator] queryAXTree (role): nodeId=" << root_node_id
+            << " role=" << role << " name=" << name;
+
+  session->SendCdpCommand(
+      "Accessibility.queryAXTree", std::move(params),
+      base::BindOnce(&ElementLocator::OnQueryAXTreeResponse,
+                     weak_factory_.GetWeakPtr(),
+                     session, std::move(callback)));
+}
+
+// ============================================================
+// OnGetDocumentForAXQueryByText: DOM.getDocument 응답 → queryAXTree({nodeId, accessibleName})
+// ============================================================
+
+void ElementLocator::OnGetDocumentForAXQueryByText(McpSession* session,
+                                                   const std::string& text,
+                                                   Callback callback,
+                                                   base::Value response) {
+  if (HasCdpError(response)) {
+    std::string error_msg = ExtractCdpErrorMessage(response);
+    LOG(ERROR) << "[ElementLocator] DOM.getDocument 실패 (text 쿼리용): "
+               << error_msg;
+    std::move(callback).Run(std::nullopt,
+                            "DOM.getDocument 실패: " + error_msg);
+    return;
+  }
+
+  int root_node_id = ExtractRootNodeId(response);
+  if (root_node_id <= 0) {
+    std::move(callback).Run(std::nullopt,
+                            "DOM 루트 노드 ID를 획득할 수 없습니다");
+    return;
+  }
+
+  base::DictValue params;
+  params.Set("nodeId", root_node_id);
+  params.Set("accessibleName", text);
+
+  LOG(INFO) << "[ElementLocator] queryAXTree (text): nodeId=" << root_node_id
+            << " accessibleName=" << text;
+
+  session->SendCdpCommand(
+      "Accessibility.queryAXTree", std::move(params),
+      base::BindOnce(&ElementLocator::OnQueryAXTreeResponse,
+                     weak_factory_.GetWeakPtr(),
+                     session, std::move(callback)));
 }
 
 // ============================================================
@@ -205,15 +283,15 @@ void ElementLocator::LocateByText(McpSession* session,
                                   bool exact,
                                   Callback callback) {
   if (exact) {
-    // exact 모드: Accessibility.queryAXTree에 accessibleName으로 검색
-    base::DictValue params;
-    params.Set("accessibleName", text);
-
+    // exact 모드: DOM.getDocument로 루트 nodeId 획득 후
+    // queryAXTree에 nodeId 포함하여 호출 (Chromium 146 필수 파라미터)
+    base::DictValue doc_params;
+    doc_params.Set("depth", 0);
     session->SendCdpCommand(
-        "Accessibility.queryAXTree", std::move(params),
-        base::BindOnce(&ElementLocator::OnQueryAXTreeResponse,
+        "DOM.getDocument", std::move(doc_params),
+        base::BindOnce(&ElementLocator::OnGetDocumentForAXQueryByText,
                        weak_factory_.GetWeakPtr(),
-                       session, std::move(callback)));
+                       session, text, std::move(callback)));
   } else {
     // contains 모드: 전체 AX 트리를 가져와서 클라이언트 사이드 필터링
     base::DictValue params;

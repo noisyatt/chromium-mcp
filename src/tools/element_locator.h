@@ -72,6 +72,13 @@ class ElementLocator {
                     bool exact,
                     Callback callback);
 
+  // exact:true 시 DOM.getDocument → nodeId 획득 → queryAXTree({nodeId, role, name})
+  void OnGetDocumentForAXQueryByRole(McpSession* session,
+                                     const std::string& role,
+                                     const std::string& name,
+                                     Callback callback,
+                                     base::Value response);
+
   // exact:false 시 getFullAXTree 후 role + name contains 필터
   void OnFullAXTreeForRole(McpSession* session,
                            const std::string& role,
@@ -89,6 +96,12 @@ class ElementLocator {
                     const std::string& text,
                     bool exact,
                     Callback callback);
+
+  // exact:true 시 DOM.getDocument → nodeId 획득 → queryAXTree({nodeId, accessibleName})
+  void OnGetDocumentForAXQueryByText(McpSession* session,
+                                     const std::string& text,
+                                     Callback callback,
+                                     base::Value response);
 
   // -----------------------------------------------------------------------
   // DOM 경로: CSS 셀렉터
