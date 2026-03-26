@@ -162,7 +162,7 @@ void ClipboardTool::HandleRead(base::OnceCallback<void(base::Value)> callback) {
   // callback 내에서 UTF-16 → UTF-8 변환 후 MCP 응답을 반환한다.
   clipboard->ReadText(
       ui::ClipboardBuffer::kCopyPaste,
-      /*data_dst=*/std::nullopt,
+      /*data_dst=*/nullptr,
       base::BindOnce(
           [](base::OnceCallback<void(base::Value)> cb,
              std::u16string text_utf16) {
