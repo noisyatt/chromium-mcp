@@ -26,6 +26,9 @@ FindTool::~FindTool() = default;
 FindTool::SearchContext::SearchContext() = default;
 FindTool::SearchContext::~SearchContext() = default;
 
+FindTool::SearchContext::AXEntry::AXEntry() = default;
+FindTool::SearchContext::AXEntry::~AXEntry() = default;
+
 // ============================================================
 // McpTool 인터페이스
 // ============================================================

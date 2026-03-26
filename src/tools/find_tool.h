@@ -67,6 +67,8 @@ class FindTool : public McpTool {
     // 중간 상태 — role/name/text 경로
     // AX 노드 목록: 각 항목은 {backendDOMNodeId, role, name, description, enabled}를 담음
     struct AXEntry {
+      AXEntry();
+      ~AXEntry();
       int backend_node_id = 0;
       std::string role;
       std::string name;
