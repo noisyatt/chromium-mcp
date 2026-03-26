@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_session.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 
 namespace mcp {
 
@@ -181,7 +182,7 @@ void ConsoleTool::StartSafeMode(McpSession* session,
     result.Set("success", true);
     result.Set("message", "이미 콘솔 캡처가 진행 중입니다");
     result.Set("mode", safe_mode_ ? "safe" : "full");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
 
@@ -229,7 +230,7 @@ void ConsoleTool::OnLogEnabled(McpSession* session,
   result.Set("success", true);
   result.Set("message", "콘솔 캡처를 시작했습니다 (안전 모드: Log.entryAdded)");
   result.Set("mode", "safe");
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeJsonResult(std::move(result)));
 }
 
 void ConsoleTool::OnLogEntryAdded(const std::string& event_name,
@@ -287,7 +288,7 @@ void ConsoleTool::StartFullMode(McpSession* session,
     result.Set("success", true);
     result.Set("message", "이미 콘솔 캡처가 진행 중입니다");
     result.Set("mode", safe_mode_ ? "safe" : "full");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
 
@@ -337,7 +338,7 @@ void ConsoleTool::OnRuntimeEnabled(McpSession* session,
              "콘솔 캡처를 시작했습니다 (전체 모드: Runtime.consoleAPICalled). "
              "주의: DevTools 감지 위험이 있습니다.");
   result.Set("mode", "full");
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeJsonResult(std::move(result)));
 }
 
 void ConsoleTool::OnConsoleApiCalled(const std::string& event_name,
@@ -403,7 +404,7 @@ void ConsoleTool::StopCapture(McpSession* session,
     base::DictValue result;
     result.Set("success", true);
     result.Set("message", "캡처가 이미 중지되어 있습니다");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
 
@@ -423,7 +424,7 @@ void ConsoleTool::StopCapture(McpSession* session,
   result.Set("message", "콘솔 캡처를 중지했습니다");
   result.Set("messageCount", static_cast<int>(messages_.size()));
   result.Set("mode", safe_mode_ ? "safe" : "full");
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeJsonResult(std::move(result)));
 }
 
 // -----------------------------------------------------------------------
@@ -469,7 +470,7 @@ void ConsoleTool::GetMessages(const std::string& level_filter,
   result.Set("totalCount", static_cast<int>(messages_.size()));
   result.Set("isCapturing", is_capturing_);
   result.Set("mode", safe_mode_ ? "safe" : "full");
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeJsonResult(std::move(result)));
 }
 
 // -----------------------------------------------------------------------
@@ -487,7 +488,7 @@ void ConsoleTool::ClearMessages(
   result.Set("success", true);
   result.Set("message", "콘솔 메시지 버퍼를 초기화했습니다");
   result.Set("clearedCount", cleared);
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeJsonResult(std::move(result)));
 }
 
 // -----------------------------------------------------------------------

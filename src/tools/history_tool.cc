@@ -13,6 +13,7 @@
 #include "base/values.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/mcp/mcp_session.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -253,7 +254,7 @@ void HistoryTool::ExecuteDelete(const std::string& url,
   result.Set("success", true);
   result.Set("url", url);
   result.Set("message", "URL 방문 기록이 삭제 대기열에 추가되었습니다");
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeJsonResult(std::move(result)));
 }
 
 // -----------------------------------------------------------------------
@@ -307,7 +308,7 @@ void HistoryTool::ExecuteDeleteRange(
             result.Set("startTime", st);
             result.Set("endTime",   et);
             result.Set("message",   "시간 범위 방문 기록이 삭제되었습니다");
-            std::move(cb).Run(base::Value(std::move(result)));
+            std::move(cb).Run(MakeJsonResult(std::move(result)));
           },
           std::move(callback), start_time, end_time),
       &task_tracker_);
@@ -341,7 +342,7 @@ void HistoryTool::ExecuteDeleteAll(
             base::DictValue result;
             result.Set("success", true);
             result.Set("message", "전체 방문 기록이 삭제되었습니다");
-            std::move(cb).Run(base::Value(std::move(result)));
+            std::move(cb).Run(MakeJsonResult(std::move(result)));
           },
           std::move(callback)),
       &task_tracker_);
@@ -360,7 +361,7 @@ void HistoryTool::OnQueryHistoryResult(
   out.Set("success", true);
   out.Set("total",   static_cast<int>(results.size()));
   out.Set("items",   SerializeResults(results));
-  std::move(callback).Run(base::Value(std::move(out)));
+  std::move(callback).Run(MakeJsonResult(std::move(out)));
 }
 
 // -----------------------------------------------------------------------

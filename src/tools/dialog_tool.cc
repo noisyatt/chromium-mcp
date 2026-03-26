@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_session.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 
 namespace mcp {
 
@@ -132,7 +133,7 @@ void DialogTool::Execute(const base::DictValue& arguments,
     if (current_dialog_.has_value()) {
       result.Set("dialogType", current_dialog_->type);
     }
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
   const std::string& action = *action_ptr;
@@ -155,7 +156,7 @@ void DialogTool::Execute(const base::DictValue& arguments,
         result.Set("defaultPrompt", current_dialog_->default_prompt);
       }
     }
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
 
@@ -168,7 +169,7 @@ void DialogTool::Execute(const base::DictValue& arguments,
     err.Set("error",
             "유효하지 않은 action: " + action +
             ". accept/dismiss/getInfo 중 하나를 사용하세요");
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeErrorResult(err.FindString("error") ? *err.FindString("error") : "invalid action"));
     return;
   }
 
@@ -178,7 +179,7 @@ void DialogTool::Execute(const base::DictValue& arguments,
     base::DictValue result;
     result.Set("success", false);
     result.Set("error", "현재 열린 다이얼로그가 없습니다");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
 
@@ -300,9 +301,7 @@ void DialogTool::OnHandleDialogResponse(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
   if (!response.is_dict()) {
-    base::DictValue err;
-    err.Set("error", "Page.handleJavaScriptDialog 응답 형식 오류");
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeErrorResult("Page.handleJavaScriptDialog 응답 형식 오류"));
     return;
   }
 
@@ -313,17 +312,12 @@ void DialogTool::OnHandleDialogResponse(
     std::string err_msg = msg ? *msg : "다이얼로그 처리 실패";
     LOG(ERROR) << "[DialogTool] 다이얼로그 처리 오류: " << err_msg;
     base::DictValue result;
-    result.Set("success", false);
-    result.Set("error", err_msg);
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeErrorResult("다이얼로그 처리 실패: " + err_msg));
     return;
   }
 
   LOG(INFO) << "[DialogTool] 다이얼로그 처리 성공";
-  base::DictValue result;
-  result.Set("success", true);
-  result.Set("message", "다이얼로그를 처리했습니다");
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeSuccessResult("다이얼로그를 처리했습니다"));
 }
 
 }  // namespace mcp

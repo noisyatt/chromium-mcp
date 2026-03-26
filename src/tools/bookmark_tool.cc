@@ -14,6 +14,7 @@
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/mcp/mcp_session.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -224,7 +225,6 @@ void BookmarkTool::Execute(const base::DictValue& arguments,
 
   std::move(callback).Run(std::move(result));
 }
-
 // -----------------------------------------------------------------------
 // action="list"
 // -----------------------------------------------------------------------
@@ -264,7 +264,7 @@ base::Value BookmarkTool::ExecuteList(const std::string& folder_id,
   result.Set("folderId", folder_id.empty() ? "bar" : folder_id);
   result.Set("count",    static_cast<int>(children.size()));
   result.Set("items",    std::move(children));
-  return base::Value(std::move(result));
+  return MakeJsonResult(std::move(result));
 }
 
 // -----------------------------------------------------------------------
@@ -320,7 +320,7 @@ base::Value BookmarkTool::ExecuteAdd(const std::string& parent_id,
   base::DictValue result;
   result.Set("success",  true);
   result.Set("bookmark", SerializeNode(new_node, /*recursive=*/false));
-  return base::Value(std::move(result));
+  return MakeJsonResult(std::move(result));
 }
 
 // -----------------------------------------------------------------------
@@ -360,7 +360,7 @@ base::Value BookmarkTool::ExecuteRemove(const std::string& bookmark_id,
   result.Set("success",    true);
   result.Set("bookmarkId", bookmark_id);
   result.Set("message",    "북마크가 삭제되었습니다");
-  return base::Value(std::move(result));
+  return MakeJsonResult(std::move(result));
 }
 
 // -----------------------------------------------------------------------
@@ -397,7 +397,7 @@ base::Value BookmarkTool::ExecuteSearch(const std::string& query,
   result.Set("query",   query);
   result.Set("count",   static_cast<int>(items.size()));
   result.Set("items",   std::move(items));
-  return base::Value(std::move(result));
+  return MakeJsonResult(std::move(result));
 }
 
 // -----------------------------------------------------------------------
@@ -454,7 +454,7 @@ base::Value BookmarkTool::ExecuteMove(const std::string& bookmark_id,
   result.Set("bookmarkId",          bookmark_id);
   result.Set("destinationFolderId", destination_folder_id);
   result.Set("bookmark",            SerializeNode(node, /*recursive=*/false));
-  return base::Value(std::move(result));
+  return MakeJsonResult(std::move(result));
 }
 
 // -----------------------------------------------------------------------

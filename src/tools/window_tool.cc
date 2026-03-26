@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_session.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 
 namespace mcp {
 
@@ -399,7 +400,7 @@ void WindowTool::ExecuteList(McpSession* session,
                       result.Set("note",
                                  "CDP는 전체 윈도우 목록 API를 제공하지 않아 "
                                  "현재 탭의 윈도우 정보만 반환합니다");
-                      std::move(cb).Run(base::Value(std::move(result)));
+                      std::move(cb).Run(MakeJsonResult(std::move(result)));
                     },
                     window_id, std::move(callback)));
           },
@@ -435,7 +436,7 @@ void WindowTool::OnSetWindowBoundsResponse(
   result.Set("success", true);
   result.Set("action",  action);
   result.Set("message", action + " 완료");
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeJsonResult(std::move(result)));
 }
 
 void WindowTool::OnGetWindowBoundsResponse(
@@ -487,7 +488,7 @@ void WindowTool::OnGetWindowBoundsResponse(
             << result.FindInt("height").value_or(0)
             << " state=" << (state ? *state : "normal");
 
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeJsonResult(std::move(result)));
 }
 
 // static

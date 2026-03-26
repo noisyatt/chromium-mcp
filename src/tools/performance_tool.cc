@@ -11,6 +11,7 @@
 #include "base/logging.h"
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_session.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 
 namespace mcp {
 
@@ -214,7 +215,7 @@ void PerformanceTool::OnMetricsReceived(
       result.Set("success", true);
       result.Set("metrics", metrics->Clone());
       result.Set("summary", std::move(summary));
-      std::move(callback).Run(base::Value(std::move(result)));
+      std::move(callback).Run(MakeJsonResult(std::move(result)));
       return;
     }
   }
@@ -225,7 +226,7 @@ void PerformanceTool::OnMetricsReceived(
   result.Set("warning",
              "성능 메트릭을 찾을 수 없습니다. "
              "Performance.enable이 필요할 수 있습니다.");
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeJsonResult(std::move(result)));
 }
 
 // -----------------------------------------------------------------------
@@ -306,7 +307,7 @@ void PerformanceTool::OnTraceStarted(
              "트레이스 녹화가 시작되었습니다. "
              "stopTrace 액션으로 중지하세요.");
   result.Set("status", "recording");
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeJsonResult(std::move(result)));
 }
 
 // -----------------------------------------------------------------------
@@ -398,7 +399,7 @@ void PerformanceTool::OnTracingComplete(
       result.Set("dataLossOccurred", data_loss.value_or(false));
       result.Set("savedTo", saved_path);
       result.Set("writeSuccess", write_ok);
-      std::move(stop_trace_callback_).Run(base::Value(std::move(result)));
+      std::move(stop_trace_callback_).Run(MakeJsonResult(std::move(result)));
     }
     return;
   }
@@ -411,7 +412,7 @@ void PerformanceTool::OnTracingComplete(
     result.Set("eventCount", total_events);
     result.Set("dataLossOccurred", data_loss.value_or(false));
     result.Set("traceEvents", std::move(all_events));
-    std::move(stop_trace_callback_).Run(base::Value(std::move(result)));
+    std::move(stop_trace_callback_).Run(MakeJsonResult(std::move(result)));
   }
 }
 
@@ -607,7 +608,7 @@ void PerformanceTool::OnNavigationTimingReceived(
         base::DictValue result;
         result.Set("success", true);
         result.Set("data", *value_str);
-        std::move(callback).Run(base::Value(std::move(result)));
+        std::move(callback).Run(MakeJsonResult(std::move(result)));
         return;
       }
     }

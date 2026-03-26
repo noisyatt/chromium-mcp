@@ -77,6 +77,10 @@ bool McpSession::Attach() {
   SendCdpCommand("Accessibility.enable", base::DictValue(),
                  base::BindOnce([](base::Value) {}));
 
+  // Page 도메인 활성화 (Page.javascriptDialogOpening 이벤트 수신에 필요)
+  SendCdpCommand("Page.enable", base::DictValue(),
+                 base::BindOnce([](base::Value) {}));
+
   return true;
 }
 

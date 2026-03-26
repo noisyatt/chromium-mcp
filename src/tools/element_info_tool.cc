@@ -218,7 +218,7 @@ void ElementInfoTool::FetchProperties(std::shared_ptr<QueryContext> ctx) {
       *finalized = true;
       ctx->result.Set("success", true);
       ctx->result.Set("selector", ctx->selector);
-      std::move(ctx->callback).Run(base::Value(std::move(ctx->result)));
+      std::move(ctx->callback).Run(MakeJsonResult(std::move(ctx->result)));
     }
   };
 
@@ -475,7 +475,7 @@ void ElementInfoTool::OnRuntimeEvaluateResponse(
 void ElementInfoTool::FinalizeResult(std::shared_ptr<QueryContext> ctx) {
   ctx->result.Set("success", true);
   ctx->result.Set("selector", ctx->selector);
-  std::move(ctx->callback).Run(base::Value(std::move(ctx->result)));
+  std::move(ctx->callback).Run(MakeJsonResult(std::move(ctx->result)));
 }
 
 }  // namespace mcp

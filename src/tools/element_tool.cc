@@ -303,7 +303,7 @@ void ElementTool::DispatchRequests(std::shared_ptr<QueryContext> ctx) {
   if (ctx->pending == 0) {
     ctx->result.Set("success", true);
     ctx->result.Set("selector", ctx->selector);
-    std::move(ctx->callback).Run(base::Value(std::move(ctx->result)));
+    std::move(ctx->callback).Run(MakeJsonResult(std::move(ctx->result)));
     return;
   }
 
@@ -529,7 +529,7 @@ void ElementTool::OnOneRequestDone(std::shared_ptr<QueryContext> ctx) {
   ctx->result.Set("nodeId",   ctx->node_id);
 
   LOG(INFO) << "[ElementTool] 조회 완료 selector=" << ctx->selector;
-  std::move(ctx->callback).Run(base::Value(std::move(ctx->result)));
+  std::move(ctx->callback).Run(MakeJsonResult(std::move(ctx->result)));
 }
 
 // -----------------------------------------------------------------------

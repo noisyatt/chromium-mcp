@@ -11,6 +11,7 @@
 #include "base/logging.h"
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_session.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 
 namespace mcp {
 
@@ -183,7 +184,7 @@ void CoverageTool::OnCssTrackingStarted(
   result.Set("message",
              "CSS 커버리지 추적을 시작했습니다. "
              "stopCSS 액션으로 결과를 수집하세요.");
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeJsonResult(std::move(result)));
 }
 
 // -----------------------------------------------------------------------
@@ -260,7 +261,7 @@ void CoverageTool::OnCssTrackingStopped(
     base::DictValue result;
     result.Set("success", true);
     result.Set("summary", AggregateCssUsage(base::ListValue(), detailed));
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
 
@@ -272,7 +273,7 @@ void CoverageTool::OnCssTrackingStopped(
   base::DictValue result;
   result.Set("success", true);
   result.Set("summary", std::move(aggregate));
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeJsonResult(std::move(result)));
 }
 
 void CoverageTool::OnCssDisabled(base::Value response) {
@@ -367,7 +368,7 @@ void CoverageTool::OnJsCoverageStarted(
   result.Set("message",
              "JS 커버리지 측정을 시작했습니다. "
              "stopJS 액션으로 결과를 수집하세요.");
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeJsonResult(std::move(result)));
 }
 
 // -----------------------------------------------------------------------
@@ -446,7 +447,7 @@ void CoverageTool::OnJsCoverageTaken(
     base::DictValue result;
     result.Set("success", true);
     result.Set("summary", AggregateJsUsage(base::ListValue(), detailed));
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
 
@@ -458,7 +459,7 @@ void CoverageTool::OnJsCoverageTaken(
   base::DictValue result;
   result.Set("success", true);
   result.Set("summary", std::move(aggregate));
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeJsonResult(std::move(result)));
 }
 
 void CoverageTool::OnJsCoverageStopped(base::Value response) {
