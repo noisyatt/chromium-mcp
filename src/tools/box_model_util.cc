@@ -85,13 +85,16 @@ std::string ExtractCdpErrorMessage(const base::Value& response) {
 }
 
 // DOM.getDocument 응답에서 rootNodeId를 추출한다.
+// SendCdpCommand 편의 오버로드가 "result"를 벗겨서 전달하므로 양쪽 모두 지원.
 int ExtractRootNodeId(const base::Value& response) {
   const base::DictValue* dict = response.GetIfDict();
-  const base::DictValue* result = dict ? dict->FindDict("result") : nullptr;
-  const base::DictValue* root = result ? result->FindDict("root") : nullptr;
-  if (!root) {
-    return -1;
-  }
+  if (!dict) return -1;
+  // 편의 오버로드: dict = {"root": {...}} (result 이미 벗겨짐)
+  // raw 오버로드: dict = {"result": {"root": {...}}}
+  const base::DictValue* result = dict->FindDict("result");
+  if (!result) result = dict;
+  const base::DictValue* root = result->FindDict("root");
+  if (!root) return -1;
   std::optional<int> node_id = root->FindInt("nodeId");
   return node_id.value_or(-1);
 }
@@ -99,13 +102,9 @@ int ExtractRootNodeId(const base::Value& response) {
 // DOM.querySelector 응답에서 nodeId를 추출한다.
 int ExtractNodeId(const base::Value& response) {
   const base::DictValue* dict = response.GetIfDict();
-  if (!dict) {
-    return -1;
-  }
+  if (!dict) return -1;
   const base::DictValue* result = dict->FindDict("result");
-  if (!result) {
-    return -1;
-  }
+  if (!result) result = dict;
   std::optional<int> node_id = result->FindInt("nodeId");
   return node_id.value_or(-1);
 }
@@ -115,13 +114,9 @@ bool ExtractBoxModelCenter(const base::Value& response,
                            double* out_x,
                            double* out_y) {
   const base::DictValue* dict = response.GetIfDict();
-  if (!dict) {
-    return false;
-  }
+  if (!dict) return false;
   const base::DictValue* result = dict->FindDict("result");
-  if (!result) {
-    return false;
-  }
+  if (!result) result = dict;
   const base::DictValue* model = result->FindDict("model");
   if (!model) {
     return false;
@@ -148,13 +143,9 @@ bool ExtractBoxModelCenter(const base::Value& response,
 bool ExtractBoundingBox(const base::Value& response,
                         base::DictValue* out_rect) {
   const base::DictValue* dict = response.GetIfDict();
-  if (!dict) {
-    return false;
-  }
+  if (!dict) return false;
   const base::DictValue* result = dict->FindDict("result");
-  if (!result) {
-    return false;
-  }
+  if (!result) result = dict;
   const base::DictValue* model = result->FindDict("model");
   if (!model) {
     return false;

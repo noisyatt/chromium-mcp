@@ -382,7 +382,8 @@ void StorageTool::OnEvaluateResponse(
   }
 
   // JavaScript 예외 발생 여부 확인 (예: QuotaExceededError)
-  std::string exception_msg = ExtractExceptionMessage(*result);
+  // exceptionDetails는 dict 최상위에 존재 (result 내부가 아님)
+  std::string exception_msg = ExtractExceptionMessage(*dict);
   if (!exception_msg.empty()) {
     LOG(WARNING) << "[StorageTool] JavaScript 예외: " << exception_msg;
     std::move(callback).Run(
@@ -391,15 +392,8 @@ void StorageTool::OnEvaluateResponse(
   }
 
   // 정상 결과 처리
-  const base::DictValue* remote_obj = result->FindDict("result");
-  if (!remote_obj) {
-    // setItem/removeItem/clear는 undefined를 반환하므로 성공으로 처리
-    LOG(INFO) << "[StorageTool] 작업 완료 (반환값 없음)";
-    std::move(callback).Run(MakeSuccessResult("작업이 완료되었습니다."));
-    return;
-  }
-
-  std::string result_str = RemoteObjectToString(*remote_obj);
+  // result는 이미 RemoteObject (편의 오버로드가 "result" 레벨을 벗김)
+  std::string result_str = RemoteObjectToString(*result);
 
   // undefined: setItem/removeItem/clear 등 반환값 없는 작업의 정상 결과
   if (result_str == "undefined") {

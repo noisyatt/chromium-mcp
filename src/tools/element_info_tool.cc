@@ -458,17 +458,12 @@ void ElementInfoTool::OnRuntimeEvaluateResponse(
   if (!response.is_dict()) return;
 
   const base::DictValue& dict = response.GetDict();
+  // 편의 오버로드: dict = {"result": RemoteObject, ...}
+  // result_obj는 이미 RemoteObject
   const base::DictValue* result_obj = dict.FindDict("result");
-  const base::DictValue* eval_result = result_obj;
+  if (!result_obj) return;
 
-  if (eval_result) {
-    const base::DictValue* inner = eval_result->FindDict("result");
-    if (inner) eval_result = inner;
-  }
-
-  if (!eval_result) return;
-
-  const base::Value* val = eval_result->Find("value");
+  const base::Value* val = result_obj->Find("value");
   if (val) {
     ctx->result.Set(property_name, val->Clone());
     LOG(INFO) << "[ElementInfoTool] " << property_name << " 조회 완료";

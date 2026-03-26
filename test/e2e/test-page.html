@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>MCP E2E Test Page</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 8px; }
+    h2 { margin-top: 0; color: #333; }
+    #hover-tooltip { display: none; background: #333; color: #fff; padding: 5px 10px; border-radius: 4px; position: absolute; }
+    #hover-trigger:hover + #hover-tooltip { display: block; }
+    #delayed-el { display: none; padding: 10px; background: #e0ffe0; margin-top: 10px; }
+    #animated-box { transition: transform 0.5s; width: 50px; height: 50px; background: blue; color: #fff; text-align: center; line-height: 50px; }
+    #drag-source { width: 80px; height: 80px; background: green; color: #fff; text-align: center; line-height: 80px; cursor: grab; display: inline-block; }
+    #drop-target { width: 200px; height: 100px; background: #eee; border: 2px dashed #999; display: inline-block; vertical-align: top; margin-left: 20px; text-align: center; line-height: 100px; }
+    #scroll-container { height: 150px; overflow: auto; border: 1px solid #aaa; padding: 10px; }
+    .result-display { margin-top: 5px; padding: 5px; background: #f0f0f0; font-family: monospace; min-height: 20px; }
+  </style>
+</head>
+<body>
+
+<!-- Section A: Basic Interaction -->
+<section id="sec-basic">
+  <h2>A. Basic Interaction</h2>
+  <button id="btn-click" onclick="document.getElementById('click-result').textContent='clicked'">Click Test</button>
+  <button id="btn-right" oncontextmenu="document.getElementById('click-result').textContent='right-clicked'; return false;">Right Click</button>
+  <a id="link-nav" href="#navigated" onclick="document.getElementById('click-result').textContent='link-clicked'">Navigation Link</a>
+  <div id="click-result" class="result-display"></div>
+</section>
+
+<!-- Section B: Input -->
+<section id="sec-input">
+  <h2>B. Input</h2>
+  <label>Name: <input id="input-text" type="text" placeholder="Enter name" aria-label="Name Input"></label><br><br>
+  <label>Readonly: <input id="input-readonly" type="text" readonly value="readonly value" aria-label="Readonly Input"></label><br><br>
+  <label>Memo: <textarea id="textarea-fill" aria-label="Memo Input" rows="3" cols="40"></textarea></label><br><br>
+  <label>Password: <input id="input-password" type="password" aria-label="Password Input"></label>
+</section>
+
+<!-- Section C: Dropdown/Select -->
+<section id="sec-select">
+  <h2>C. Dropdown</h2>
+  <label>Single: <select id="select-single">
+    <option value="">Select...</option>
+    <option value="opt1">Option 1</option>
+    <option value="opt2">Option 2</option>
+    <option value="opt3">Option 3</option>
+  </select></label><br><br>
+  <label>Multiple: <select id="select-multiple" multiple size="3">
+    <option value="a">Alpha</option>
+    <option value="b">Beta</option>
+    <option value="c">Gamma</option>
+  </select></label>
+</section>
+
+<!-- Section D: Dynamic Elements -->
+<section id="sec-dynamic">
+  <h2>D. Dynamic Elements</h2>
+  <button id="btn-delayed" onclick="setTimeout(function(){document.getElementById('delayed-el').style.display='block'},2000)">Show Delayed (2s)</button>
+  <div id="delayed-el" role="alert" aria-label="Delayed Message">Appeared after 2 seconds!</div>
+  <button id="btn-remove" onclick="this.remove()">Remove Self</button>
+  <div id="animated-box">Anim</div>
+  <button id="btn-animate" onclick="document.getElementById('animated-box').style.transform='translateX(200px)'">Animate</button>
+</section>
+
+<!-- Section E: Drag -->
+<section id="sec-drag">
+  <h2>E. Drag & Drop</h2>
+  <div id="drag-source" draggable="true">Drag Me</div>
+  <div id="drop-target">Drop Here</div>
+</section>
+
+<!-- Section F: Hover -->
+<section id="sec-hover">
+  <h2>F. Hover</h2>
+  <div id="hover-trigger" style="width:120px;height:60px;background:#ffd700;text-align:center;line-height:60px;cursor:pointer;">Hover Me</div>
+  <div id="hover-tooltip">Tooltip Content</div>
+</section>
+
+<!-- Section G: Scroll -->
+<section id="sec-scroll">
+  <h2>G. Scroll</h2>
+  <div id="scroll-container">
+    <div style="height:1000px;">
+      <p>Top of scroll container</p>
+      <p style="margin-top:500px;">Middle of scroll container</p>
+      <p style="margin-top:400px;">Bottom of scroll container</p>
+    </div>
+  </div>
+</section>
+
+<!-- Section H: Dialog -->
+<section id="sec-dialog">
+  <h2>H. Dialog</h2>
+  <button id="btn-alert" onclick="alert('Test Alert')">Alert</button>
+  <button id="btn-confirm" onclick="document.getElementById('dialog-result').textContent=confirm('Confirm?')">Confirm</button>
+  <button id="btn-prompt" onclick="document.getElementById('dialog-result').textContent=prompt('Your name?')">Prompt</button>
+  <div id="dialog-result" class="result-display"></div>
+</section>
+
+<!-- Section I: File Upload -->
+<section id="sec-upload">
+  <h2>I. File Upload</h2>
+  <label>Single: <input id="file-input" type="file" aria-label="File Upload"></label><br><br>
+  <label>Multiple: <input id="file-multi" type="file" multiple aria-label="Multi File"></label>
+</section>
+
+<!-- Section J: Accessibility Roles -->
+<section id="sec-a11y">
+  <h2>J. Accessibility</h2>
+  <nav aria-label="Main Navigation">
+    <a href="#" role="link" aria-label="Home">Home</a> |
+    <a href="#" role="link" aria-label="About">About</a>
+  </nav>
+  <form role="form" aria-label="Search Form" onsubmit="return false;">
+    <input type="search" role="searchbox" aria-label="Search Query" placeholder="Search...">
+    <button type="submit" aria-label="Search Button">Search</button>
+  </form>
+</section>
+
+<!-- Section K: Checkbox/Radio -->
+<section id="sec-checks">
+  <h2>K. Checkbox & Radio</h2>
+  <label><input type="checkbox" id="chk-terms" aria-label="Agree Terms"> Agree to terms</label><br>
+  <label><input type="radio" name="color" value="red" aria-label="Red"> Red</label>
+  <label><input type="radio" name="color" value="blue" aria-label="Blue"> Blue</label>
+</section>
+
+<!-- Section L: Download -->
+<section id="sec-download">
+  <h2>L. Download</h2>
+  <a id="download-link" href="data:text/plain;base64,dGVzdCBkb3dubG9hZCBjb250ZW50" download="test.txt">Download test.txt</a>
+</section>
+
+<!-- Section M: Duplicate elements for visible-priority test -->
+<section id="sec-duplicate">
+  <h2>M. Duplicate Elements</h2>
+  <button id="dup-hidden" style="display:none" aria-label="Duplicate Button">Hidden Dup</button>
+  <button id="dup-visible" aria-label="Duplicate Button">Visible Dup</button>
+</section>
+
+<!-- Extra height for scroll testing -->
+<div style="height: 1000px;"></div>
+
+<script>
+  // Console messages for console tool test
+  console.log("Page loaded successfully");
+  console.warn("Warning message for test");
+
+  // Drag and drop handlers
+  var dragSrc = document.getElementById('drag-source');
+  var dropTgt = document.getElementById('drop-target');
+  dragSrc.addEventListener('dragstart', function(e) { e.dataTransfer.setData('text/plain', 'dragged'); });
+  dropTgt.addEventListener('dragover', function(e) { e.preventDefault(); });
+  dropTgt.addEventListener('drop', function(e) { e.preventDefault(); dropTgt.textContent = 'Dropped!'; dropTgt.style.background = '#c0ffc0'; });
+</script>
+</body>
+</html>

@@ -177,15 +177,14 @@ void FindTool::Execute(const base::DictValue& arguments,
 
 void FindTool::DoRoleSearch(std::shared_ptr<SearchContext> ctx) {
   if (ctx->exact || ctx->name.empty()) {
-    // exact 또는 name 없음 → queryAXTree (정확 매칭)
-    base::DictValue params;
-    params.Set("role", ctx->role);
-    if (!ctx->name.empty())
-      params.Set("accessibleName", ctx->name);
+    // exact 또는 name 없음 → DOM.getDocument로 rootNodeId 획득 후 queryAXTree
+    base::DictValue doc_params;
+    doc_params.Set("depth", 0);
+    doc_params.Set("pierce", false);
 
     ctx->session->SendCdpCommand(
-        "Accessibility.queryAXTree", std::move(params),
-        base::BindOnce(&FindTool::OnQueryAXTree,
+        "DOM.getDocument", std::move(doc_params),
+        base::BindOnce(&FindTool::OnGetDocumentForRoleSearch,
                        weak_factory_.GetWeakPtr(), ctx));
   } else {
     // name이 있고 exact:false → getFullAXTree + contains 필터
@@ -202,12 +201,14 @@ void FindTool::DoRoleSearch(std::shared_ptr<SearchContext> ctx) {
 
 void FindTool::DoTextSearch(std::shared_ptr<SearchContext> ctx) {
   if (ctx->exact) {
-    base::DictValue params;
-    params.Set("accessibleName", ctx->text);
+    // exact → DOM.getDocument로 rootNodeId 획득 후 queryAXTree
+    base::DictValue doc_params;
+    doc_params.Set("depth", 0);
+    doc_params.Set("pierce", false);
 
     ctx->session->SendCdpCommand(
-        "Accessibility.queryAXTree", std::move(params),
-        base::BindOnce(&FindTool::OnQueryAXTree,
+        "DOM.getDocument", std::move(doc_params),
+        base::BindOnce(&FindTool::OnGetDocumentForTextSearch,
                        weak_factory_.GetWeakPtr(), ctx));
   } else {
     ctx->session->SendCdpCommand(
@@ -215,6 +216,68 @@ void FindTool::DoTextSearch(std::shared_ptr<SearchContext> ctx) {
         base::BindOnce(&FindTool::OnFullAXTree,
                        weak_factory_.GetWeakPtr(), ctx, /*is_role_search=*/false));
   }
+}
+
+// ============================================================
+// OnGetDocumentForRoleSearch: DOM.getDocument 응답 → queryAXTree (role)
+// ============================================================
+
+void FindTool::OnGetDocumentForRoleSearch(
+    std::shared_ptr<SearchContext> ctx,
+    base::Value response) {
+  if (HasCdpError(response)) {
+    std::move(ctx->callback).Run(MakeErrorResult(
+        "DOM.getDocument 실패: " + ExtractCdpErrorMessage(response)));
+    return;
+  }
+
+  int root_id = ExtractRootNodeId(response);
+  if (root_id <= 0) {
+    std::move(ctx->callback).Run(
+        MakeErrorResult("DOM.getDocument: 루트 nodeId 추출 실패"));
+    return;
+  }
+
+  base::DictValue params;
+  params.Set("nodeId", root_id);
+  params.Set("role", ctx->role);
+  if (!ctx->name.empty())
+    params.Set("accessibleName", ctx->name);
+
+  ctx->session->SendCdpCommand(
+      "Accessibility.queryAXTree", std::move(params),
+      base::BindOnce(&FindTool::OnQueryAXTree,
+                     weak_factory_.GetWeakPtr(), ctx));
+}
+
+// ============================================================
+// OnGetDocumentForTextSearch: DOM.getDocument 응답 → queryAXTree (text)
+// ============================================================
+
+void FindTool::OnGetDocumentForTextSearch(
+    std::shared_ptr<SearchContext> ctx,
+    base::Value response) {
+  if (HasCdpError(response)) {
+    std::move(ctx->callback).Run(MakeErrorResult(
+        "DOM.getDocument 실패: " + ExtractCdpErrorMessage(response)));
+    return;
+  }
+
+  int root_id = ExtractRootNodeId(response);
+  if (root_id <= 0) {
+    std::move(ctx->callback).Run(
+        MakeErrorResult("DOM.getDocument: 루트 nodeId 추출 실패"));
+    return;
+  }
+
+  base::DictValue params;
+  params.Set("nodeId", root_id);
+  params.Set("accessibleName", ctx->text);
+
+  ctx->session->SendCdpCommand(
+      "Accessibility.queryAXTree", std::move(params),
+      base::BindOnce(&FindTool::OnQueryAXTree,
+                     weak_factory_.GetWeakPtr(), ctx));
 }
 
 // ============================================================

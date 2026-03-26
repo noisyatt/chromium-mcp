@@ -278,10 +278,10 @@ void SelectOptionTool::OnEvaluateComplete(
   }
 
   // 결과에서 반환 문자열 추출
+  // 편의 오버로드: dict = {"result": RemoteObject, ...} → result = RemoteObject
   const base::DictValue* dict = response.GetIfDict();
   const base::DictValue* result = dict ? dict->FindDict("result") : nullptr;
-  const base::DictValue* value_obj = result ? result->FindDict("result") : nullptr;
-  const std::string* return_val = value_obj ? value_obj->FindString("value") : nullptr;
+  const std::string* return_val = result ? result->FindString("value") : nullptr;
 
   std::string message = return_val ? *return_val : "옵션 선택이 완료되었습니다.";
   LOG(INFO) << "[SelectOptionTool] 완료: " << message;

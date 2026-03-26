@@ -516,12 +516,11 @@ void WaitTool::OnEvaluateResponse(std::shared_ptr<WaitContext> ctx,
   if (response.is_dict()) {
     const base::DictValue& dict = response.GetDict();
     if (!dict.FindDict("error")) {
+      // 편의 오버로드: dict = {"result": RemoteObject, ...}
+      // result_obj는 이미 RemoteObject
       const base::DictValue* result_obj = dict.FindDict("result");
       if (result_obj) {
-        const base::DictValue* inner_result = result_obj->FindDict("result");
-        const base::DictValue* eval_result =
-            inner_result ? inner_result : result_obj;
-        const base::Value* val = eval_result->Find("value");
+        const base::Value* val = result_obj->Find("value");
         if (val) {
           if (val->is_bool()) {
             condition_met = val->GetBool();

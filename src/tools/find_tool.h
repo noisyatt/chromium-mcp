@@ -112,6 +112,14 @@ class FindTool : public McpTool {
   // AX Tree 경로 콜백
   // -----------------------------------------------------------------------
 
+  // DOM.getDocument 응답 → queryAXTree (role 검색)
+  void OnGetDocumentForRoleSearch(std::shared_ptr<SearchContext> ctx,
+                                  base::Value response);
+
+  // DOM.getDocument 응답 → queryAXTree (text 검색)
+  void OnGetDocumentForTextSearch(std::shared_ptr<SearchContext> ctx,
+                                  base::Value response);
+
   // Accessibility.queryAXTree 응답 → ax_entries 수집 → ResolveAXEntries
   void OnQueryAXTree(std::shared_ptr<SearchContext> ctx, base::Value response);
 

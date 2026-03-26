@@ -426,7 +426,8 @@ void JavaScriptTool::OnEvaluateResponse(
   }
 
   // JavaScript 예외 발생 여부 확인 (런타임 예외 ≠ CDP 에러)
-  std::string exception_msg = ExtractExceptionMessage(*result);
+  // exceptionDetails는 dict 최상위에 존재 (result 내부가 아님)
+  std::string exception_msg = ExtractExceptionMessage(*dict);
   if (!exception_msg.empty()) {
     LOG(WARNING) << "[JavaScriptTool] JavaScript 예외: " << exception_msg;
     std::move(callback).Run(MakeErrorResult("JavaScript 예외: " + exception_msg));
@@ -434,15 +435,9 @@ void JavaScriptTool::OnEvaluateResponse(
   }
 
   // 정상 결과 처리
-  const base::DictValue* remote_obj = result->FindDict("result");
-  if (!remote_obj) {
-    // result.result가 없는 경우는 매우 드물지만 방어 처리
-    LOG(WARNING) << "[JavaScriptTool] result.result RemoteObject가 없음";
-    std::move(callback).Run(MakeSuccessResult("undefined"));
-    return;
-  }
-
-  std::string result_str = RemoteObjectToString(*remote_obj);
+  // dict->FindDict("result")는 이미 RemoteObject 자체임
+  // (SendCdpCommand 편의 오버로드가 CDP 응답의 "result" 레벨을 벗겨서 전달)
+  std::string result_str = RemoteObjectToString(*result);
   LOG(INFO) << "[JavaScriptTool] 실행 결과: " << result_str;
   std::move(callback).Run(MakeSuccessResult(result_str));
 }
