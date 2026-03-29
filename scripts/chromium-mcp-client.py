@@ -4,6 +4,17 @@ chromium-mcp-client.py
 stdio ↔ Chromium MCP 소켓 브릿지 (프레이밍 변환 포함)
 
 Claude CLI (raw JSON, 줄바꿈 구분) ↔ Chromium MCP (Content-Length 프레이밍)
+
+== 환경변수 ==
+로컬 모드 (기본):
+  CHROMIUM_MCP_SOCKET  — 커스텀 소켓 경로 (기본: /tmp/.chromium-mcp.sock)
+
+원격 모드:
+  CHROMIUM_MCP_HOST    — 원격 호스트 IP/hostname
+  CHROMIUM_MCP_USER    — SSH 유저 (기본: root)
+  CHROMIUM_MCP_SSH_KEY — SSH 키 경로 (기본: ~/.ssh/proxmox)
+  CHROMIUM_MCP_SSH_JUMP — SSH 점프호스트 (예: proxmox)
+  CHROMIUM_MCP_REMOTE_SOCKET — 원격 소켓 경로 (기본: /tmp/.chromium-mcp.sock)
 """
 import os
 import select
@@ -13,11 +24,13 @@ import subprocess
 import sys
 import time
 
-CHROMIUM_SOCKET = '/tmp/.chromium-mcp.sock'
+CHROMIUM_SOCKET = os.environ.get('CHROMIUM_MCP_SOCKET', '/tmp/.chromium-mcp.sock')
 PROXY_SOCKET = '/tmp/.chromium-mcp-proxy.sock'
 DAEMON_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'chromium-mcp-daemon.py')
 BUF_SIZE = 65536
 CONNECT_TIMEOUT = 30
+SSH_RECONNECT_DELAY = 3
+SSH_MAX_RETRIES = 5
 
 _running = True
 
@@ -25,6 +38,75 @@ _running = True
 def _handle_signal(signum, frame):
     global _running
     _running = False
+
+
+def _is_remote_mode() -> bool:
+    return bool(os.environ.get('CHROMIUM_MCP_HOST'))
+
+
+def connect_remote_ssh():
+    """paramiko로 SSH 연결 후 원격 Unix socket 채널 반환."""
+    try:
+        import paramiko
+    except ImportError:
+        sys.stderr.write("[chromium-mcp-client] paramiko 미설치. pip install paramiko\n")
+        sys.exit(1)
+
+    host = os.environ['CHROMIUM_MCP_HOST']
+    user = os.environ.get('CHROMIUM_MCP_USER', 'root')
+    key_path = os.path.expanduser(os.environ.get('CHROMIUM_MCP_SSH_KEY', '~/.ssh/proxmox'))
+    jump_host = os.environ.get('CHROMIUM_MCP_SSH_JUMP', '')
+    remote_socket = os.environ.get('CHROMIUM_MCP_REMOTE_SOCKET', '/tmp/.chromium-mcp.sock')
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    # 점프호스트 경유
+    proxy_channel = None
+    if jump_host:
+        jump_ssh = paramiko.SSHClient()
+        jump_ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # SSH config에서 점프호스트 정보 읽기
+        ssh_config = paramiko.SSHConfig()
+        config_path = os.path.expanduser('~/.ssh/config')
+        if os.path.exists(config_path):
+            with open(config_path) as f:
+                ssh_config.parse(f)
+        jump_cfg = ssh_config.lookup(jump_host)
+        jump_hostname = jump_cfg.get('hostname', jump_host)
+        jump_user = jump_cfg.get('user', 'root')
+        jump_key = jump_cfg.get('identityfile', [key_path])
+        if isinstance(jump_key, list):
+            jump_key = os.path.expanduser(jump_key[0])
+
+        jump_ssh.connect(jump_hostname, username=jump_user, key_filename=jump_key, timeout=10)
+        transport = jump_ssh.get_transport()
+        proxy_channel = transport.open_channel(
+            'direct-tcpip', (host, 22), ('127.0.0.1', 0)
+        )
+        ssh.connect(host, username=user, key_filename=key_path, sock=proxy_channel, timeout=10)
+    else:
+        ssh.connect(host, username=user, key_filename=key_path, timeout=10)
+
+    # 원격 Unix socket 접근: socat으로 소켓을 stdin/stdout에 연결
+    channel = ssh.get_transport().open_session()
+    channel.exec_command(f'socat STDIO UNIX-CONNECT:{remote_socket}')
+    return ssh, channel
+
+
+def connect_remote_with_retry():
+    """SSH 연결 + 재시도 로직."""
+    for attempt in range(1, SSH_MAX_RETRIES + 1):
+        try:
+            ssh, channel = connect_remote_ssh()
+            sys.stderr.write(f"[chromium-mcp-client] 원격 연결 성공: {os.environ['CHROMIUM_MCP_HOST']}\n")
+            return ssh, channel
+        except Exception as e:
+            sys.stderr.write(f"[chromium-mcp-client] SSH 연결 실패 ({attempt}/{SSH_MAX_RETRIES}): {e}\n")
+            if attempt < SSH_MAX_RETRIES:
+                time.sleep(SSH_RECONNECT_DELAY)
+    sys.stderr.write("[chromium-mcp-client] SSH 연결 최대 재시도 초과\n")
+    sys.exit(1)
 
 
 def connect_chromium_socket() -> socket.socket:
@@ -62,15 +144,39 @@ def connect_chromium_socket() -> socket.socket:
     sys.exit(1)
 
 
-def proxy_loop(sock: socket.socket) -> None:
+def _send_to_channel(channel, data: bytes):
+    """paramiko 채널 또는 소켓에 데이터 전송."""
+    if hasattr(channel, 'sendall'):
+        channel.sendall(data)
+    else:
+        # paramiko Channel은 sendall이 없을 수 있음
+        while data:
+            sent = channel.send(data)
+            if sent <= 0:
+                raise OSError("채널 전송 실패")
+            data = data[sent:]
+
+
+def _recv_from_channel(channel, size: int) -> bytes:
+    """paramiko 채널 또는 소켓에서 데이터 수신."""
+    if hasattr(channel, 'recv'):
+        return channel.recv(size)
+    return b''
+
+
+def proxy_loop(sock_or_channel) -> None:
     """
-    stdin(raw JSON) ↔ socket(Content-Length framed) 양방향 변환 프록시.
+    stdin(raw JSON) ↔ socket/channel(Content-Length framed) 양방향 변환 프록시.
 
     stdin → socket: raw JSON에 Content-Length 헤더를 붙여서 전송
     socket → stdout: Content-Length 프레이밍을 파싱하고 바디만 stdout에 출력
+
+    sock_or_channel: socket.socket (로컬) 또는 paramiko.Channel (원격)
     """
     stdin_fd = sys.stdin.buffer.fileno()
     stdout_fd = sys.stdout.buffer.fileno()
+
+    ch = sock_or_channel
 
     # stdin 쪽 미처리 버퍼 (줄 단위 파싱용)
     stdin_buf = b''
@@ -80,7 +186,7 @@ def proxy_loop(sock: socket.socket) -> None:
     while _running:
         try:
             readable, _, exceptional = select.select(
-                [stdin_fd, sock], [], [stdin_fd, sock], 1.0
+                [stdin_fd, ch], [], [stdin_fd, ch], 1.0
             )
         except (ValueError, OSError):
             break
@@ -111,7 +217,7 @@ def proxy_loop(sock: socket.socket) -> None:
                         b'\r\n\r\n' + line
                     )
                     try:
-                        sock.sendall(framed)
+                        _send_to_channel(ch, framed)
                     except OSError:
                         return
 
@@ -121,10 +227,10 @@ def proxy_loop(sock: socket.socket) -> None:
                     # 단, select 타임아웃 후에도 남아있으면 처리
                     pass
 
-            elif fd == sock:
+            elif fd == ch:
                 # === socket → stdout (Content-Length 프레이밍 제거) ===
                 try:
-                    data = sock.recv(BUF_SIZE)
+                    data = _recv_from_channel(ch, BUF_SIZE)
                 except OSError:
                     return
                 if not data:
@@ -175,7 +281,7 @@ def proxy_loop(sock: socket.socket) -> None:
                 b'\r\n\r\n' + line
             )
             try:
-                sock.sendall(framed)
+                _send_to_channel(ch, framed)
             except OSError:
                 return
 
@@ -183,14 +289,26 @@ def proxy_loop(sock: socket.socket) -> None:
 def main() -> None:
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
-    sock = connect_chromium_socket()
-    try:
-        proxy_loop(sock)
-    finally:
+
+    if _is_remote_mode():
+        ssh, channel = connect_remote_with_retry()
         try:
-            sock.close()
-        except Exception:
-            pass
+            proxy_loop(channel)
+        finally:
+            try:
+                channel.close()
+                ssh.close()
+            except Exception:
+                pass
+    else:
+        sock = connect_chromium_socket()
+        try:
+            proxy_loop(sock)
+        finally:
+            try:
+                sock.close()
+            except Exception:
+                pass
 
 
 if __name__ == '__main__':
