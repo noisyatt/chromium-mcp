@@ -421,10 +421,14 @@ class InstancePool:
         spec = runtime.spec
         if spec.transport == 'unix':
             if self._is_local_manager_instance(spec):
-                wait_timeout = 5.0 if for_healthcheck else SOCKET_WAIT
-                if not self._chromium_manager.wait_ready(timeout=wait_timeout):
-                    raise RuntimeError('로컬 Chromium 준비 실패')
-            return _connect_unix_with_retry(spec.socket, retries=MAX_RETRY)
+                if for_healthcheck:
+                    # healthcheck에서는 Chromium을 새로 시작하지 않고 소켓 존재만 확인
+                    if not os.path.exists(spec.socket):
+                        raise RuntimeError('로컬 소켓 없음 (Chromium 미실행)')
+                else:
+                    if not self._chromium_manager.wait_ready(timeout=SOCKET_WAIT):
+                        raise RuntimeError('로컬 Chromium 준비 실패')
+            return _connect_unix_with_retry(spec.socket, retries=1 if for_healthcheck else MAX_RETRY)
 
         if spec.transport == 'ssh-unix':
             return _connect_remote_via_paramiko(spec)
@@ -526,6 +530,9 @@ class InstancePool:
                     if rt.state == InstanceState.UP_IDLE
                     and not rt.skip_reason
                     and rt.active_sessions == 0
+                    # 로컬 매니저 인스턴스는 lazy-start 대상이므로
+                    # healthcheck로 DOWN 전이시키지 않는다.
+                    and not self._is_local_manager_instance(rt.spec)
                 ]
 
             for runtime in targets:
