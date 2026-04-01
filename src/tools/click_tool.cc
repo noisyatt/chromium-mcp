@@ -24,12 +24,18 @@ base::DictValue MakeMouseEventParams(const std::string& type,
                                      double x,
                                      double y,
                                      const std::string& button) {
-  // CDP 버튼 인덱스: left=0, middle=1, right=2
-  int button_index = 0;
-  if (button == "middle") {
-    button_index = 1;
-  } else if (button == "right") {
-    button_index = 2;
+  // CDP buttons 비트마스크: left=1, right=2, middle=4
+  int pressed_buttons = 1;
+  if (button == "right") {
+    pressed_buttons = 2;
+  } else if (button == "middle") {
+    pressed_buttons = 4;
+  }
+
+  // mouseReleased 시점에는 버튼이 눌려있지 않아야 한다.
+  int buttons = 0;
+  if (type == "mousePressed") {
+    buttons = pressed_buttons;
   }
 
   base::DictValue params;
@@ -37,7 +43,7 @@ base::DictValue MakeMouseEventParams(const std::string& type,
   params.Set("x", x);
   params.Set("y", y);
   params.Set("button", button);
-  params.Set("buttons", button_index == 0 ? 1 : (button_index == 1 ? 4 : 2));
+  params.Set("buttons", buttons);
   params.Set("clickCount", 1);
   params.Set("modifiers", 0);
   return params;

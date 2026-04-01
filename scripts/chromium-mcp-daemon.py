@@ -160,7 +160,13 @@ class ChromiumManager:
                 env = os.environ.copy()
                 env.update(_load_google_api_env())
                 proc = subprocess.Popen(
-                    [CHROMIUM_PATH, '--no-first-run', '--disable-default-apps'],
+                    [CHROMIUM_PATH,
+                     '--no-first-run',
+                     '--disable-default-apps',
+                     '--no-default-browser-check',
+                     '--homepage=about:blank',
+                     '--homepage=about:blank',
+                    ],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     env=env

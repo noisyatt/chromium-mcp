@@ -52,10 +52,14 @@ void ActionabilityChecker::VerifyAndLocate(McpSession* session,
   // force=true → Locate만 수행하고 체크 건너뜀
   if (options.force) {
     LOG(INFO) << "[ActionabilityChecker] force=true, 체크 건너뜀";
+    // ctx를 람다에 캡처하여 Locate 완료 시까지 PollContext(및 내부 locator)의
+    // 수명을 유지한다. 캡처하지 않으면 locator의 weak_factory_가 무효화되어
+    // CDP 응답 콜백이 취소된다.
     ctx->locator.Locate(
         session, params,
         base::BindOnce(
-            [](Callback cb, std::optional<ElementLocator::Result> result,
+            [](std::shared_ptr<PollContext> prevent_destroy, Callback cb,
+               std::optional<ElementLocator::Result> result,
                std::string error) {
               if (!result.has_value()) {
                 ElementLocator::Result empty;
@@ -64,7 +68,7 @@ void ActionabilityChecker::VerifyAndLocate(McpSession* session,
               }
               std::move(cb).Run(*result, "");
             },
-            std::move(ctx->callback)));
+            ctx, std::move(ctx->callback)));
     return;
   }
 
