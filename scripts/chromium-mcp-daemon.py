@@ -878,11 +878,29 @@ def _handle_signal(signum=None, frame=None) -> None:
             pass
 
 
+def _check_already_running() -> bool:
+    """기존 데몬이 실행 중이면 True 반환."""
+    if not os.path.isfile(PID_FILE):
+        return False
+    try:
+        with open(PID_FILE) as f:
+            old_pid = int(f.read().strip())
+        os.kill(old_pid, 0)  # 프로세스 존재 확인
+        log.warning(f'데몬이 이미 실행 중 (PID={old_pid}). 종료합니다.')
+        return True
+    except (ValueError, OSError):
+        # PID 파일은 있지만 프로세스가 없음 — 정리
+        return False
+
+
 def main() -> None:
     global _server_socket, _listen_socket_path
 
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
+
+    if _check_already_running():
+        sys.exit(0)
 
     write_pid()
     log.info(f'=== Chromium MCP Pool 데몬 시작 (PID={os.getpid()}) ===')
