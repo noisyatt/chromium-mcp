@@ -304,10 +304,24 @@ DISPLAY=:1 ./out/Default/chrome --no-first-run --no-default-browser-check
 5. **chromium-mcp + Xvfb가 현존 최선의 봇 감지 우회 방식**
 6. **브라우저 우회만으로 불충분** — 네트워크/행동 계층도 병행 관리 필요
 
-### 미결 사항 (추후 결정 필요)
+### 구현 결과 (2026-04-02)
 
-- 오케스트레이터 구현 방식 (스크립트 vs 전용 서비스)
+**컨센서스 → 실제 구현 완료. 설계 변경점:**
+
+1. **데몬 N개 → Pool Daemon 1개로 변경** — MCP 서버 등록 1개 유지하면서 자동 배정
+   - daemon.py가 인스턴스 풀 관리, 클라이언트별 자동 배정, 세션 어피니티
+   - `~/.chromium-mcp/pool.json`으로 설정
+2. **client.py SSH 로직 → daemon.py로 이동** — client.py는 순수 프레이밍 변환만
+3. **MCP 응답 정규화 레이어 추가** — C++(mcp_server.cc) + Python(client.py) 이중 적용
+4. **click 도구 WeakPtr 버그 수정** — force 경로에서 PollContext 수명 관리
+
+**테스트:**
+- Mac 41/41 PASS (35개 도구 전수, client.py 경유)
+- Pool 배정 6/6 PASS
+- LXC 원격 e2e 기본 동작 확인 (click은 LXC 재빌드 필요)
+
+### 미결 사항
+
+- LXC Chromium 재빌드 (actionability_checker.cc + mcp_server.cc 반영)
 - 프록시/IP 관리 전략 구체화
 - 행동 패턴 자연화 구현 수준
-- Linux 빌드 환경 선정 (GitHub Actions vs 별도 VM vs 클라우드)
-- LXC 네트워크 구성 (브릿지 vs NAT vs 독립 IP)
