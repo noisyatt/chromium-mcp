@@ -12,6 +12,7 @@ Claude CLI(raw JSON, 줄바꿈 구분) ↔ Chromium MCP(Content-Length 프레이
 
 from __future__ import annotations
 
+import json
 import os
 import select
 import signal
@@ -27,7 +28,48 @@ DAEMON_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'chromi
 BUF_SIZE = 65536
 CONNECT_TIMEOUT = 30
 
+_IMAGE_PREFIXES = (b'iVBORw0KGgo', b'/9j/', b'R0lGOD', b'UklGR', b'Qk')
+
 _running = True
+
+
+def _normalize_mcp_response(body: bytes) -> bytes:
+    """MCP 응답에 content[] 가 없으면 자동으로 래핑한다."""
+    try:
+        msg = json.loads(body)
+    except (json.JSONDecodeError, ValueError):
+        return body
+
+    result = msg.get('result')
+    if not isinstance(result, dict):
+        return body
+
+    # 이미 content[] 가 있으면 그대로
+    if isinstance(result.get('content'), list):
+        return body
+
+    is_error = result.get('isError', False)
+
+    # base64 이미지 감지
+    data = result.get('data')
+    if isinstance(data, str) and len(data) > 100:
+        data_bytes = data.encode('ascii', errors='ignore')
+        if any(data_bytes.startswith(p) for p in _IMAGE_PREFIXES):
+            result_new = {
+                'content': [{'type': 'image', 'data': data, 'mimeType': 'image/png'}]
+            }
+            msg['result'] = result_new
+            return json.dumps(msg, ensure_ascii=False).encode('utf-8')
+
+    # 일반 텍스트 래핑
+    text = json.dumps(result, ensure_ascii=False)
+    result_new = {
+        'content': [{'type': 'text', 'text': text}]
+    }
+    if is_error:
+        result_new['isError'] = True
+    msg['result'] = result_new
+    return json.dumps(msg, ensure_ascii=False).encode('utf-8')
 
 
 def _handle_signal(signum, frame):
@@ -167,6 +209,9 @@ def proxy_loop(sock: socket.socket) -> None:
 
                     body = sock_buf[body_start:body_end]
                     sock_buf = sock_buf[body_end:]
+
+                    # MCP 응답 정규화: content[] 형식 보장
+                    body = _normalize_mcp_response(body)
 
                     try:
                         os.write(stdout_fd, body + b'\n')
