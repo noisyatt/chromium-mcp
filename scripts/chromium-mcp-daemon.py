@@ -1,56 +1,58 @@
 #!/usr/bin/env python3
 """
 chromium-mcp-daemon.py
-Chromium MCP 데몬 — 로그인 시 자동 시작, 항시 실행
+Chromium MCP 풀 데몬
 
 역할:
-  1. Chromium 실행 유지 (크래시 감지 → 자동 재시작)
-  2. /tmp/.chromium-mcp-proxy.sock 에서 클라이언트 연결 수락
-  3. 각 클라이언트를 Chromium MCP 소켓에 독립 연결로 브릿지
+  1. /tmp/.chromium-mcp-proxy.sock(기본)에서 다중 클라이언트 연결 수락
+  2. 인스턴스 풀에서 LRU 기반으로 백엔드 인스턴스 배정
+  3. 클라이언트 ↔ 백엔드 소켓 바이트 단위 양방향 relay
+  4. 유휴 인스턴스 주기 healthcheck
+
+호환성:
+  - ~/.chromium-mcp/pool.json 이 없으면 기존 단일 로컬 인스턴스 모드로 동작한다.
 """
+
+from __future__ import annotations
+
+import glob
+import json
+import logging
+import os
+import shlex
+import signal
 import socket
 import subprocess
-import threading
-import os
 import sys
+import threading
 import time
-import logging
-import signal
+from dataclasses import dataclass, field
 from enum import Enum, auto
 
-CHROMIUM_PATH    = os.environ.get(
+try:
+    import paramiko  # type: ignore
+except ImportError:  # pragma: no cover - 선택적 의존성
+    paramiko = None
+
+CHROMIUM_PATH = os.environ.get(
     'CHROMIUM_MCP_BROWSER_PATH',
     '/Users/daniel/chromium/src/out/Default/Chromium.app/Contents/MacOS/Chromium'
 )
-CHROMIUM_SOCKET  = '/tmp/.chromium-mcp.sock'
-PROXY_SOCKET     = '/tmp/.chromium-mcp-proxy.sock'
-PID_FILE         = '/tmp/chromium-mcp-daemon.pid'
-LOG_FILE         = '/tmp/chromium-mcp-daemon.log'
-MONITOR_INTERVAL = 10   # 초 — 프로세스 폴링 주기
-SOCKET_WAIT      = 20   # 초 — Chromium 소켓 대기 최대 시간
-MAX_RETRY        = 3    # 시작 재시도 횟수
-RETRY_DELAY      = 2    # 재시도 간격(초)
-GRACE_PERIOD     = 5    # 소켓 끊김 → STOPPED 전이 유예(초)
-COOLDOWN         = 30   # 연속 크래시 후 재시작 대기(초)
+CHROMIUM_SOCKET = '/tmp/.chromium-mcp.sock'
+DEFAULT_PROXY_SOCKET = '/tmp/.chromium-mcp-proxy.sock'
+PID_FILE = '/tmp/chromium-mcp-daemon.pid'
+LOG_FILE = '/tmp/chromium-mcp-daemon.log'
+POOL_CONFIG_FILE = os.path.expanduser('~/.chromium-mcp/pool.json')
 
-# Google API 키 파일 경로 (~/.chromium-mcp/google-api.env)
+MONITOR_INTERVAL = 10
+SOCKET_WAIT = 20
+MAX_RETRY = 3
+RETRY_DELAY = 2
+GRACE_PERIOD = 5
+COOLDOWN = 30
+SSH_CONNECT_TIMEOUT = 10
+
 GOOGLE_API_ENV = os.path.expanduser('~/.chromium-mcp/google-api.env')
-
-
-def _load_google_api_env() -> dict[str, str]:
-    """~/.chromium-mcp/google-api.env 에서 KEY=VALUE 쌍을 읽어 dict로 반환."""
-    result = {}
-    if not os.path.isfile(GOOGLE_API_ENV):
-        return result
-    with open(GOOGLE_API_ENV) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            if '=' in line:
-                k, v = line.split('=', 1)
-                result[k.strip()] = v.strip()
-    return result
 
 logging.basicConfig(
     level=logging.INFO,
@@ -63,45 +65,48 @@ logging.basicConfig(
 log = logging.getLogger('chromium-mcp-daemon')
 
 _running = True
+_server_socket: socket.socket | None = None
+_listen_socket_path = DEFAULT_PROXY_SOCKET
+
+
+def _load_google_api_env() -> dict[str, str]:
+    """~/.chromium-mcp/google-api.env 에서 KEY=VALUE 쌍을 읽어 dict로 반환."""
+    result: dict[str, str] = {}
+    if not os.path.isfile(GOOGLE_API_ENV):
+        return result
+    with open(GOOGLE_API_ENV) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            if '=' in line:
+                k, v = line.split('=', 1)
+                result[k.strip()] = v.strip()
+    return result
 
 
 # ---------------------------------------------------------------------------
-# ChromiumManager — Actor / State Machine
+# ChromiumManager — 로컬 Chromium 생명주기 관리 (기존 구조 유지)
 # ---------------------------------------------------------------------------
+
 
 class State(Enum):
-    STOPPED  = auto()
+    STOPPED = auto()
     STARTING = auto()
-    READY    = auto()
+    READY = auto()
     STOPPING = auto()
 
 
 class ChromiumManager:
-    """Chromium 프로세스 생애주기를 단일 스레드-안전 상태머신으로 관리한다.
-
-    상태 전이:
-        STOPPED → (trigger_start) → STARTING → READY
-        READY   → (crash)         → STOPPED  → (auto restart)
-        *       → (shutdown)      → STOPPING
-    """
+    """로컬 Chromium 프로세스 생애주기를 단일 상태머신으로 관리한다."""
 
     def __init__(self) -> None:
-        self._lock      = threading.Lock()
-        self._cond      = threading.Condition(self._lock)
-        self._state     = State.STOPPED
+        self._lock = threading.Lock()
+        self._cond = threading.Condition(self._lock)
+        self._state = State.STOPPED
         self._proc: subprocess.Popen | None = None
 
-    # ------------------------------------------------------------------
-    # 공개 API
-    # ------------------------------------------------------------------
-
     def wait_ready(self, timeout: float = 30.0) -> bool:
-        """READY 상태가 될 때까지 대기한다.
-
-        - STOPPED → 자동으로 _trigger_start() 호출
-        - STARTING → Condition.wait()로 블로킹
-        - 반환값: True(READY 도달) / False(타임아웃 또는 STOPPING)
-        """
         deadline = time.monotonic() + timeout
         with self._cond:
             while True:
@@ -114,11 +119,10 @@ class ChromiumManager:
                     log.error('wait_ready 타임아웃')
                     return False
                 if self._state == State.STOPPED:
-                    self._trigger_start()   # 락 보유 상태에서 호출 (내부에서 스레드 분기)
+                    self._trigger_start()
                 self._cond.wait(timeout=min(remaining, 1.0))
 
     def shutdown(self) -> None:
-        """데몬 종료 시 Chromium 프로세스를 정리한다."""
         with self._cond:
             if self._state == State.STOPPING:
                 return
@@ -136,12 +140,7 @@ class ChromiumManager:
             except Exception as e:
                 log.warning(f'프로세스 종료 중 오류: {e}')
 
-    # ------------------------------------------------------------------
-    # 내부 전이 메서드 (모두 _lock 보유 상태에서 호출 가능)
-    # ------------------------------------------------------------------
-
     def _trigger_start(self) -> None:
-        """STOPPED 상태일 때만 시작 스레드를 분기한다 (이중 시작 방지)."""
         if self._state != State.STOPPED:
             return
         log.info('ChromiumManager: STOPPED → STARTING')
@@ -150,17 +149,11 @@ class ChromiumManager:
         threading.Thread(target=self._do_start, daemon=True).start()
 
     def _set_state(self, new_state: State) -> None:
-        """락 보유 여부와 무관하게 안전하게 상태를 전이한다."""
         with self._cond:
             self._state = new_state
             self._cond.notify_all()
 
-    # ------------------------------------------------------------------
-    # 시작 스레드
-    # ------------------------------------------------------------------
-
     def _do_start(self) -> None:
-        """별도 스레드에서 실행. Popen은 이 메서드에서만 호출된다."""
         for attempt in range(1, MAX_RETRY + 1):
             log.info(f'Chromium 시작 시도 {attempt}/{MAX_RETRY}: {CHROMIUM_PATH}')
             try:
@@ -182,20 +175,18 @@ class ChromiumManager:
                     time.sleep(RETRY_DELAY)
                 continue
 
-            # 소켓 준비 대기
             if self._wait_socket(proc):
                 with self._cond:
                     if self._state == State.STOPPING:
                         proc.terminate()
                         return
-                    self._proc  = proc
+                    self._proc = proc
                     self._state = State.READY
                     self._cond.notify_all()
                 log.info('ChromiumManager: STARTING → READY')
                 threading.Thread(target=self._monitor_loop, daemon=True).start()
                 return
 
-            # 소켓 타임아웃 — 프로세스 종료 후 재시도
             log.warning('소켓 대기 타임아웃, 프로세스 종료 후 재시도')
             try:
                 proc.terminate()
@@ -205,12 +196,10 @@ class ChromiumManager:
             if attempt < MAX_RETRY:
                 time.sleep(RETRY_DELAY)
 
-        # 모든 시도 실패 → STOPPED 복귀
         log.error('Chromium 시작 최종 실패 — STOPPED 복귀')
         self._set_state(State.STOPPED)
 
     def _wait_socket(self, proc: subprocess.Popen) -> bool:
-        """소켓이 연결 가능해질 때까지 대기. 프로세스가 죽으면 즉시 False."""
         deadline = time.monotonic() + SOCKET_WAIT
         while time.monotonic() < deadline:
             if proc.poll() is not None:
@@ -228,12 +217,7 @@ class ChromiumManager:
             time.sleep(0.5)
         return False
 
-    # ------------------------------------------------------------------
-    # 모니터 루프 (READY 상태에서 실행)
-    # ------------------------------------------------------------------
-
     def _monitor_loop(self) -> None:
-        """Popen.poll()로 프로세스 상태를 주기적으로 확인한다."""
         while True:
             with self._cond:
                 if self._state != State.READY:
@@ -241,52 +225,37 @@ class ChromiumManager:
                 proc = self._proc
 
             time.sleep(MONITOR_INTERVAL)
-
             if proc is None:
                 return
 
             exit_code = proc.poll()
             if exit_code is None:
-                # 프로세스 살아있음 — 소켓도 확인
-                if not self._socket_alive():
-                    log.warning(f'소켓 끊김 감지 — {GRACE_PERIOD}초 유예 대기')
-                    time.sleep(GRACE_PERIOD)
-                    if not self._socket_alive():
-                        log.warning('소켓 유예 후 복구 실패 → STOPPED 전이, 재시작')
-                        with self._cond:
-                            if self._state == State.READY:
-                                self._state = State.STOPPED
-                                self._proc  = None
-                                self._cond.notify_all()
-                                self._trigger_start()
-                        return
+                # 프로세스가 살아있으면 소켓 체크 불필요
+                # (풀 세션이 소켓을 점유 중이면 연결 테스트가 실패할 수 있음)
                 continue
 
-            # 프로세스 종료됨
-            # exit 0 = 정상 종료, -15 = SIGTERM (macOS Cmd+Q)
             if exit_code in (0, -15):
                 log.info(f'Chromium 정상 종료 (exit={exit_code}) — 재시작 안 함')
                 with self._cond:
                     if self._state == State.READY:
                         self._state = State.STOPPED
-                        self._proc  = None
+                        self._proc = None
                         self._cond.notify_all()
-                return
-            else:
-                log.warning(f'Chromium 크래시 감지 (exit={exit_code}) — {COOLDOWN}초 후 재시작')
-                with self._cond:
-                    if self._state == State.READY:
-                        self._state = State.STOPPED
-                        self._proc  = None
-                        self._cond.notify_all()
-                time.sleep(COOLDOWN)
-                with self._cond:
-                    if self._state == State.STOPPED:
-                        self._trigger_start()
                 return
 
+            log.warning(f'Chromium 크래시 감지 (exit={exit_code}) — {COOLDOWN}초 후 재시작')
+            with self._cond:
+                if self._state == State.READY:
+                    self._state = State.STOPPED
+                    self._proc = None
+                    self._cond.notify_all()
+            time.sleep(COOLDOWN)
+            with self._cond:
+                if self._state == State.STOPPED:
+                    self._trigger_start()
+            return
+
     def _socket_alive(self) -> bool:
-        """Chromium MCP 소켓에 연결 가능한지 확인한다."""
         if not os.path.exists(CHROMIUM_SOCKET):
             return False
         try:
@@ -300,11 +269,300 @@ class ChromiumManager:
 
 
 # ---------------------------------------------------------------------------
-# 유틸리티
+# Pool 설정/런타임 모델
 # ---------------------------------------------------------------------------
 
-def _bridge(src: socket.socket, dst: socket.socket) -> None:
-    """src → dst 단방향 데이터 중계 (블로킹)."""
+
+class InstanceState(str, Enum):
+    UP_IDLE = 'UP_IDLE'
+    UP_BUSY = 'UP_BUSY'
+    DOWN = 'DOWN'
+
+
+@dataclass
+class InstanceSpec:
+    id: str
+    transport: str
+    capacity: int = 1
+    enabled: bool = True
+    socket: str = CHROMIUM_SOCKET
+    host: str = ''
+    user: str = 'root'
+    key_path: str = '~/.ssh/proxmox'
+    jump_host: str = ''
+    remote_socket: str = CHROMIUM_SOCKET
+
+
+@dataclass
+class PoolConfig:
+    listen_socket: str = DEFAULT_PROXY_SOCKET
+    assignment_strategy: str = 'least_recently_used'
+    acquire_timeout_sec: float = 20.0
+    healthcheck_interval_sec: float = 30.0
+    healthcheck_failure_threshold: int = 3
+    healthcheck_cooldown_sec: float = 60.0
+    instances: list[InstanceSpec] = field(default_factory=list)
+
+
+@dataclass
+class InstanceRuntime:
+    spec: InstanceSpec
+    state: InstanceState = InstanceState.UP_IDLE
+    active_sessions: int = 0
+    consecutive_failures: int = 0
+    last_assigned_at: float = 0.0
+    last_healthy_at: float = 0.0
+    cooldown_until: float = 0.0
+    skip_reason: str = ''
+
+
+class SSHSocketConnection:
+    """paramiko 채널을 소켓과 유사한 recv/sendall 인터페이스로 감싼다."""
+
+    def __init__(self, ssh_client, channel, jump_client=None):
+        self._ssh_client = ssh_client
+        self._channel = channel
+        self._jump_client = jump_client
+        self._closed = False
+
+    def recv(self, size: int) -> bytes:
+        return self._channel.recv(size)
+
+    def sendall(self, data: bytes) -> None:
+        view = memoryview(data)
+        while view:
+            sent = self._channel.send(view)
+            if sent <= 0:
+                raise OSError('SSH 채널 송신 실패')
+            view = view[sent:]
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        for obj in (self._channel, self._ssh_client, self._jump_client):
+            if obj is None:
+                continue
+            try:
+                obj.close()
+            except Exception:
+                pass
+
+
+class InstancePool:
+    """인스턴스 풀의 상태/배정/헬스체크를 관리한다."""
+
+    def __init__(self, cfg: PoolConfig, chromium_manager: ChromiumManager):
+        self._cfg = cfg
+        self._chromium_manager = chromium_manager
+        self._cond = threading.Condition()
+        self._running = True
+        self._instances: list[InstanceRuntime] = [
+            InstanceRuntime(spec=spec) for spec in cfg.instances
+        ]
+        self._init_instance_states()
+        self._health_thread = threading.Thread(target=self._healthcheck_loop, daemon=True)
+        self._health_thread.start()
+
+    @property
+    def listen_socket(self) -> str:
+        return self._cfg.listen_socket
+
+    @property
+    def acquire_timeout_sec(self) -> float:
+        return self._cfg.acquire_timeout_sec
+
+    def stop(self) -> None:
+        with self._cond:
+            self._running = False
+            self._cond.notify_all()
+        self._health_thread.join(timeout=2.0)
+
+    def acquire(self, timeout: float | None = None) -> InstanceRuntime | None:
+        deadline = time.monotonic() + (timeout or self._cfg.acquire_timeout_sec)
+        with self._cond:
+            while self._running:
+                now = time.monotonic()
+                self._refresh_cooldown_locked(now)
+                candidates = self._select_candidates_locked()
+                if candidates:
+                    chosen = min(candidates, key=lambda rt: (rt.last_assigned_at, rt.spec.id))
+                    chosen.active_sessions += 1
+                    chosen.last_assigned_at = now
+                    if chosen.active_sessions >= chosen.spec.capacity:
+                        chosen.state = InstanceState.UP_BUSY
+                    else:
+                        chosen.state = InstanceState.UP_IDLE
+                    log.info(
+                        f'인스턴스 배정: {chosen.spec.id} '
+                        f'(active={chosen.active_sessions}/{chosen.spec.capacity})'
+                    )
+                    return chosen
+
+                remain = deadline - now
+                if remain <= 0:
+                    return None
+                self._cond.wait(timeout=min(remain, 1.0))
+        return None
+
+    def release(self, runtime: InstanceRuntime) -> None:
+        with self._cond:
+            if runtime.active_sessions > 0:
+                runtime.active_sessions -= 1
+            if runtime.state != InstanceState.DOWN and runtime.active_sessions < runtime.spec.capacity:
+                runtime.state = InstanceState.UP_IDLE
+            self._cond.notify_all()
+        log.info(
+            f'인스턴스 반납: {runtime.spec.id} '
+            f'(active={runtime.active_sessions}/{runtime.spec.capacity})'
+        )
+
+    def connect_backend(self, runtime: InstanceRuntime, for_healthcheck: bool = False):
+        spec = runtime.spec
+        if spec.transport == 'unix':
+            if self._is_local_manager_instance(spec):
+                wait_timeout = 5.0 if for_healthcheck else SOCKET_WAIT
+                if not self._chromium_manager.wait_ready(timeout=wait_timeout):
+                    raise RuntimeError('로컬 Chromium 준비 실패')
+            return _connect_unix_with_retry(spec.socket, retries=MAX_RETRY)
+
+        if spec.transport == 'ssh-unix':
+            return _connect_remote_via_paramiko(spec)
+
+        raise RuntimeError(f'지원하지 않는 transport: {spec.transport}')
+
+    def mark_connect_success(self, runtime: InstanceRuntime) -> None:
+        with self._cond:
+            runtime.consecutive_failures = 0
+            runtime.last_healthy_at = time.monotonic()
+            if runtime.active_sessions < runtime.spec.capacity and runtime.state != InstanceState.DOWN:
+                runtime.state = InstanceState.UP_IDLE
+            self._cond.notify_all()
+
+    def mark_connect_failure(self, runtime: InstanceRuntime, reason: str) -> None:
+        self._mark_failure(runtime, f'연결 실패: {reason}')
+
+    def _init_instance_states(self) -> None:
+        for runtime in self._instances:
+            spec = runtime.spec
+            if spec.capacity <= 0:
+                spec.capacity = 1
+            if not spec.enabled:
+                runtime.state = InstanceState.DOWN
+                runtime.skip_reason = 'enabled=false'
+                log.info(f'인스턴스 비활성화: {spec.id}')
+                continue
+            if spec.transport not in ('unix', 'ssh-unix'):
+                runtime.state = InstanceState.DOWN
+                runtime.skip_reason = f'unsupported transport={spec.transport}'
+                log.warning(f'인스턴스 스킵: {spec.id} ({runtime.skip_reason})')
+                continue
+            if spec.transport == 'ssh-unix' and paramiko is None:
+                runtime.state = InstanceState.DOWN
+                runtime.skip_reason = 'paramiko 미설치'
+                log.warning(f'원격 인스턴스 스킵: {spec.id} ({runtime.skip_reason})')
+                continue
+            runtime.state = InstanceState.UP_IDLE
+            log.info(f'인스턴스 등록: {spec.id} ({spec.transport})')
+
+    def _select_candidates_locked(self) -> list[InstanceRuntime]:
+        return [
+            rt for rt in self._instances
+            if rt.state == InstanceState.UP_IDLE
+            and not rt.skip_reason
+            and rt.active_sessions < rt.spec.capacity
+        ]
+
+    def _refresh_cooldown_locked(self, now: float) -> None:
+        for runtime in self._instances:
+            if runtime.state != InstanceState.DOWN:
+                continue
+            if runtime.cooldown_until <= 0 or now < runtime.cooldown_until:
+                continue
+            if runtime.skip_reason:
+                continue
+            runtime.state = InstanceState.UP_IDLE
+            runtime.consecutive_failures = 0
+            runtime.cooldown_until = 0
+            log.info(f'인스턴스 cooldown 해제: {runtime.spec.id}')
+            self._cond.notify_all()
+
+    def _mark_failure(self, runtime: InstanceRuntime, reason: str) -> None:
+        with self._cond:
+            runtime.consecutive_failures += 1
+            fail = runtime.consecutive_failures
+            threshold = self._cfg.healthcheck_failure_threshold
+            if fail >= threshold:
+                runtime.state = InstanceState.DOWN
+                runtime.cooldown_until = time.monotonic() + self._cfg.healthcheck_cooldown_sec
+                log.warning(
+                    f'인스턴스 DOWN 전이: {runtime.spec.id} '
+                    f'(fail={fail}/{threshold}, cooldown={self._cfg.healthcheck_cooldown_sec}s, reason={reason})'
+                )
+            else:
+                if runtime.active_sessions < runtime.spec.capacity and runtime.state != InstanceState.DOWN:
+                    runtime.state = InstanceState.UP_IDLE
+                log.warning(
+                    f'인스턴스 실패 누적: {runtime.spec.id} '
+                    f'(fail={fail}/{threshold}, reason={reason})'
+                )
+            self._cond.notify_all()
+
+    def _healthcheck_loop(self) -> None:
+        while True:
+            with self._cond:
+                if not self._running:
+                    return
+                interval = max(1.0, self._cfg.healthcheck_interval_sec)
+            time.sleep(interval)
+
+            with self._cond:
+                if not self._running:
+                    return
+                now = time.monotonic()
+                self._refresh_cooldown_locked(now)
+                targets = [
+                    rt for rt in self._instances
+                    if rt.state == InstanceState.UP_IDLE
+                    and not rt.skip_reason
+                    and rt.active_sessions == 0
+                ]
+
+            for runtime in targets:
+                if not self._running:
+                    return
+                conn = None
+                try:
+                    conn = self.connect_backend(runtime, for_healthcheck=True)
+                    self.mark_connect_success(runtime)
+                except Exception as e:
+                    self._mark_failure(runtime, f'healthcheck 실패: {e}')
+                finally:
+                    _close_quietly(conn)
+
+    @staticmethod
+    def _is_local_manager_instance(spec: InstanceSpec) -> bool:
+        if spec.transport != 'unix':
+            return False
+        return os.path.abspath(spec.socket) == os.path.abspath(CHROMIUM_SOCKET)
+
+
+# ---------------------------------------------------------------------------
+# 소켓/SSH 유틸리티
+# ---------------------------------------------------------------------------
+
+
+def _close_quietly(obj) -> None:
+    if obj is None:
+        return
+    try:
+        obj.close()
+    except Exception:
+        pass
+
+
+def _bridge(src, dst) -> None:
+    """src → dst 단방향 relay. MCP 프레이밍은 그대로 통과시킨다."""
     try:
         while True:
             data = src.recv(65536)
@@ -314,39 +572,121 @@ def _bridge(src: socket.socket, dst: socket.socket) -> None:
     except Exception:
         pass
     finally:
-        try: src.close()
-        except Exception: pass
-        try: dst.close()
-        except Exception: pass
+        _close_quietly(src)
+        _close_quietly(dst)
 
 
-def _connect_chromium_with_retry() -> socket.socket | None:
-    """Chromium 소켓에 최대 MAX_RETRY회 연결을 시도한다."""
-    for attempt in range(1, MAX_RETRY + 1):
+def _connect_unix_with_retry(path: str, retries: int = MAX_RETRY):
+    last_err: Exception | None = None
+    for attempt in range(1, retries + 1):
         try:
-            cr_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            cr_sock.connect(CHROMIUM_SOCKET)
-            return cr_sock
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.settimeout(2.0)
+            sock.connect(path)
+            sock.settimeout(None)
+            return sock
         except Exception as e:
-            log.warning(f'Chromium 소켓 연결 시도 {attempt}/{MAX_RETRY} 실패: {e}')
-            if attempt < MAX_RETRY:
+            last_err = e
+            if attempt < retries:
                 time.sleep(RETRY_DELAY)
-    return None
+    raise RuntimeError(f'unix 소켓 연결 실패: {path}: {last_err}')
+
+
+def _resolve_host_config(host_alias: str, fallback_user: str, fallback_key: str) -> tuple[str, str, str]:
+    hostname = host_alias
+    user = fallback_user
+    key_path = os.path.expanduser(fallback_key)
+
+    if paramiko is None:
+        return hostname, user, key_path
+
+    ssh_config_path = os.path.expanduser('~/.ssh/config')
+    if not os.path.isfile(ssh_config_path):
+        return hostname, user, key_path
+
+    try:
+        ssh_cfg = paramiko.SSHConfig()
+        with open(ssh_config_path) as f:
+            ssh_cfg.parse(f)
+        entry = ssh_cfg.lookup(host_alias)
+        hostname = entry.get('hostname', hostname)
+        if not fallback_user:
+            user = entry.get('user', user)
+        if not fallback_key:
+            identity = entry.get('identityfile')
+            if isinstance(identity, list) and identity:
+                key_path = os.path.expanduser(identity[0])
+            elif isinstance(identity, str):
+                key_path = os.path.expanduser(identity)
+    except Exception as e:
+        log.warning(f'SSH config 파싱 실패({host_alias}): {e}')
+
+    return hostname, user, key_path
+
+
+def _connect_remote_via_paramiko(spec: InstanceSpec):
+    if paramiko is None:
+        raise RuntimeError('paramiko 미설치')
+
+    target_host, target_user, target_key = _resolve_host_config(spec.host, spec.user, spec.key_path)
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    jump_ssh = None
+    try:
+        if spec.jump_host:
+            jump_host, jump_user, jump_key = _resolve_host_config(spec.jump_host, spec.user, spec.key_path)
+            jump_ssh = paramiko.SSHClient()
+            jump_ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            jump_ssh.connect(
+                jump_host,
+                username=jump_user,
+                key_filename=jump_key,
+                timeout=SSH_CONNECT_TIMEOUT
+            )
+            jump_transport = jump_ssh.get_transport()
+            if jump_transport is None:
+                raise RuntimeError(f'jump host transport 없음: {spec.jump_host}')
+            proxy_channel = jump_transport.open_channel(
+                'direct-tcpip',
+                (target_host, 22),
+                ('127.0.0.1', 0)
+            )
+            ssh.connect(
+                target_host,
+                username=target_user,
+                key_filename=target_key,
+                sock=proxy_channel,
+                timeout=SSH_CONNECT_TIMEOUT
+            )
+        else:
+            ssh.connect(
+                target_host,
+                username=target_user,
+                key_filename=target_key,
+                timeout=SSH_CONNECT_TIMEOUT
+            )
+
+        transport = ssh.get_transport()
+        if transport is None:
+            raise RuntimeError(f'SSH transport 없음: {spec.id}')
+
+        channel = transport.open_session()
+        remote_socket_quoted = shlex.quote(spec.remote_socket)
+        channel.exec_command(f'socat STDIO UNIX-CONNECT:{remote_socket_quoted}')
+        return SSHSocketConnection(ssh_client=ssh, channel=channel, jump_client=jump_ssh)
+    except Exception:
+        _close_quietly(ssh)
+        _close_quietly(jump_ssh)
+        raise
 
 
 # ---------------------------------------------------------------------------
-# exit_type 정상 종료 마킹
+# 종료 시 exit_type 정상화
 # ---------------------------------------------------------------------------
-
-import glob
 
 
 def _fix_exit_type() -> None:
-    """Chromium 프로필의 exit_type을 Normal로 변경한다.
-
-    SIGTERM으로 종료하면 exit_type이 Crashed로 남아
-    다음 시작 시 무조건 세션 복원이 강제되는 문제를 방지한다.
-    """
     prefs_pattern = os.path.expanduser(
         '~/Library/Application Support/Chromium/*/Preferences'
     )
@@ -364,305 +704,222 @@ def _fix_exit_type() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Content-Length 프레이밍 유틸리티
+# pool.json 로드
 # ---------------------------------------------------------------------------
 
-TOOLS_CACHE = os.path.expanduser('~/.chromium-mcp/tools_cache.json')
 
-import json
-
-
-def _recv_message(sock: socket.socket, buf: bytearray) -> tuple[dict | None, bytearray]:
-    """Content-Length 프레이밍된 메시지를 1개 읽어 dict로 반환한다.
-    반환: (파싱된 dict 또는 None, 남은 버퍼)"""
-    while True:
-        header_end = buf.find(b'\r\n\r\n')
-        if header_end >= 0:
-            header = buf[:header_end]
-            content_length = None
-            for line in header.split(b'\r\n'):
-                if line.lower().startswith(b'content-length:'):
-                    content_length = int(line.split(b':', 1)[1].strip())
-            if content_length is None:
-                return None, buf
-            body_start = header_end + 4
-            body_end = body_start + content_length
-            if len(buf) >= body_end:
-                body = buf[body_start:body_end]
-                buf = buf[body_end:]
-                try:
-                    return json.loads(body), buf
-                except json.JSONDecodeError:
-                    return None, buf
-        # 데이터 더 필요
-        try:
-            data = sock.recv(65536)
-            if not data:
-                return None, buf
-            buf.extend(data)
-        except Exception:
-            return None, buf
+def _default_pool_config() -> PoolConfig:
+    return PoolConfig(
+        listen_socket=DEFAULT_PROXY_SOCKET,
+        assignment_strategy='least_recently_used',
+        acquire_timeout_sec=20.0,
+        healthcheck_interval_sec=30.0,
+        healthcheck_failure_threshold=3,
+        healthcheck_cooldown_sec=60.0,
+        instances=[
+            InstanceSpec(
+                id='local-default',
+                transport='unix',
+                socket=CHROMIUM_SOCKET,
+                capacity=1,
+                enabled=True
+            )
+        ]
+    )
 
 
-def _send_message(sock: socket.socket, msg: dict) -> bool:
-    """Content-Length 프레이밍으로 메시지를 전송한다."""
-    body = json.dumps(msg).encode()
-    frame = b'Content-Length: ' + str(len(body)).encode() + b'\r\n\r\n' + body
+def load_pool_config() -> PoolConfig:
+    """~/.chromium-mcp/pool.json 로드. 없으면 단일 로컬 기본값."""
+    default_cfg = _default_pool_config()
+    if not os.path.isfile(POOL_CONFIG_FILE):
+        log.info('pool.json 없음 — 단일 로컬 인스턴스 모드로 동작')
+        return default_cfg
+
     try:
-        sock.sendall(frame)
-        return True
-    except Exception:
-        return False
+        with open(POOL_CONFIG_FILE) as f:
+            raw = json.load(f)
+    except Exception as e:
+        log.error(f'pool.json 로드 실패({POOL_CONFIG_FILE}): {e} — 기본값 사용')
+        return default_cfg
 
+    listen_socket = raw.get('listen_socket', default_cfg.listen_socket)
+    assignment = raw.get('assignment', {})
+    healthcheck = raw.get('healthcheck', {})
 
-def _load_tools_cache() -> list | None:
-    """캐시된 도구 목록을 로드한다."""
-    if not os.path.isfile(TOOLS_CACHE):
-        return None
-    try:
-        with open(TOOLS_CACHE) as f:
-            return json.load(f)
-    except Exception:
-        return None
+    cfg = PoolConfig(
+        listen_socket=listen_socket,
+        assignment_strategy=assignment.get('strategy', 'least_recently_used'),
+        acquire_timeout_sec=float(assignment.get('acquire_timeout_sec', 20)),
+        healthcheck_interval_sec=float(healthcheck.get('interval_sec', 30)),
+        healthcheck_failure_threshold=int(healthcheck.get('failure_threshold', 3)),
+        healthcheck_cooldown_sec=float(healthcheck.get('cooldown_sec', 60)),
+        instances=[]
+    )
 
+    if cfg.assignment_strategy != 'least_recently_used':
+        log.warning(
+            f'지원하지 않는 assignment.strategy={cfg.assignment_strategy}. '
+            'least_recently_used로 동작한다.'
+        )
 
-def _save_tools_cache(tools: list) -> None:
-    """도구 목록을 캐시에 저장한다."""
-    os.makedirs(os.path.dirname(TOOLS_CACHE), exist_ok=True)
-    with open(TOOLS_CACHE, 'w') as f:
-        json.dump(tools, f)
+    raw_instances = raw.get('instances', [])
+    for item in raw_instances:
+        transport = str(item.get('transport', 'unix'))
+        spec = InstanceSpec(
+            id=str(item.get('id', f'instance-{len(cfg.instances) + 1}')),
+            transport=transport,
+            capacity=max(1, int(item.get('capacity', 1))),
+            enabled=bool(item.get('enabled', True)),
+            socket=str(item.get('socket', CHROMIUM_SOCKET)),
+            host=str(item.get('host', '')),
+            user=str(item.get('user', 'root')),
+            key_path=str(item.get('key_path', '~/.ssh/proxmox')),
+            jump_host=str(item.get('jump_host', '')),
+            remote_socket=str(item.get('remote_socket', CHROMIUM_SOCKET))
+        )
+        cfg.instances.append(spec)
 
+    if not cfg.instances:
+        log.warning('pool.json instances가 비어 있음 — 단일 로컬 인스턴스 fallback 사용')
+        cfg.instances = default_cfg.instances
+    elif paramiko is None and not any(
+        inst.enabled and inst.transport == 'unix'
+        for inst in cfg.instances
+    ):
+        # paramiko 미설치 환경에서는 원격 ssh-unix를 사용할 수 없으므로
+        # 최소한의 하위 호환을 위해 로컬 기본 인스턴스를 추가한다.
+        log.warning('paramiko 미설치 + 로컬 인스턴스 없음 — local-default 추가')
+        cfg.instances.append(default_cfg.instances[0])
 
-def _do_chromium_handshake(cr_sock: socket.socket) -> list | None:
-    """Chromium과 MCP 핸드셰이크 후 도구 목록을 반환한다."""
-    buf = bytearray()
-
-    # initialize
-    init_req = {
-        'jsonrpc': '2.0', 'id': '__daemon_init__',
-        'method': 'initialize',
-        'params': {
-            'protocolVersion': '2024-11-05',
-            'capabilities': {},
-            'clientInfo': {'name': 'chromium-mcp-daemon', 'version': '1.0'}
-        }
-    }
-    if not _send_message(cr_sock, init_req):
-        return None
-    resp, buf = _recv_message(cr_sock, buf)
-    if not resp:
-        return None
-
-    # notifications/initialized
-    _send_message(cr_sock, {
-        'jsonrpc': '2.0',
-        'method': 'notifications/initialized'
-    })
-
-    # tools/list
-    list_req = {'jsonrpc': '2.0', 'id': '__daemon_tools__', 'method': 'tools/list'}
-    if not _send_message(cr_sock, list_req):
-        return None
-    resp, buf = _recv_message(cr_sock, buf)
-    if not resp:
-        return None
-
-    tools = resp.get('result', {}).get('tools', [])
-    _save_tools_cache(tools)
-    return tools
+    return cfg
 
 
 # ---------------------------------------------------------------------------
 # 클라이언트 핸들러
 # ---------------------------------------------------------------------------
 
-def handle_client(client_sock: socket.socket, manager: ChromiumManager) -> None:
-    """MCP 프로토콜을 인식하는 스마트 프록시.
 
-    - initialize, tools/list: 데몬이 직접 응답 (Chromium 시작 안 함)
-    - tools/call 등 실제 호출: Chromium 시작 후 브릿지 전환
-    """
+def handle_client(client_sock: socket.socket, pool: InstancePool) -> None:
+    """새 클라이언트 연결을 풀 인스턴스에 배정하고 raw relay를 수행한다."""
     addr = id(client_sock)
+    runtime: InstanceRuntime | None = None
+    backend = None
+
     log.info(f'[{addr}] 클라이언트 연결')
-
-    buf = bytearray()
-    chromium_initialized = False
-    cr_sock = None
-
     try:
-        while True:
-            msg, buf = _recv_message(client_sock, buf)
-            if msg is None:
-                log.info(f'[{addr}] 클라이언트 종료')
-                return
-
-            method = msg.get('method', '')
-            msg_id = msg.get('id')
-
-            # --- initialize: 데몬이 직접 응답 ---
-            if method == 'initialize':
-                log.info(f'[{addr}] initialize 요청 — 데몬이 직접 응답')
-                resp = {
-                    'jsonrpc': '2.0', 'id': msg_id,
-                    'result': {
-                        'protocolVersion': '2024-11-05',
-                        'capabilities': {'tools': {}},
-                        'serverInfo': {'name': 'chromium-mcp', 'version': '1.0'}
-                    }
-                }
-                if not _send_message(client_sock, resp):
-                    return
-                continue
-
-            # --- notifications: 데몬이 흡수 ---
-            if method.startswith('notifications/'):
-                log.info(f'[{addr}] {method} — 흡수')
-                continue
-
-            # --- tools/list: 캐시로 응답 ---
-            if method == 'tools/list':
-                tools = _load_tools_cache()
-                if tools is not None:
-                    log.info(f'[{addr}] tools/list — 캐시 응답 ({len(tools)}개 도구)')
-                    resp = {
-                        'jsonrpc': '2.0', 'id': msg_id,
-                        'result': {'tools': tools}
-                    }
-                    if not _send_message(client_sock, resp):
-                        return
-                    continue
-                else:
-                    log.info(f'[{addr}] tools/list — 캐시 없음, Chromium 시작 필요')
-                    # 캐시가 없으면 Chromium을 시작해서 도구 목록을 가져온다
-                    # (아래 Chromium 시작 로직으로 fall through)
-
-            # --- 그 외 (tools/call 등): Chromium 시작 ---
-            if not chromium_initialized:
-                log.info(f'[{addr}] {method} — Chromium 시작')
-                if not manager.wait_ready(timeout=30):
-                    log.error(f'[{addr}] Chromium 준비 실패, 연결 끊기')
-                    return
-
-                cr_sock = _connect_chromium_with_retry()
-                if cr_sock is None:
-                    log.error(f'[{addr}] Chromium 소켓 연결 실패, 연결 끊기')
-                    return
-
-                # Chromium과 핸드셰이크 (initialize + tools/list)
-                tools = _do_chromium_handshake(cr_sock)
-                if tools is None:
-                    log.error(f'[{addr}] Chromium 핸드셰이크 실패, 연결 끊기')
-                    cr_sock.close()
-                    return
-
-                chromium_initialized = True
-                log.info(f'[{addr}] Chromium 핸드셰이크 완료 ({len(tools)}개 도구)')
-
-                # tools/list 요청이 fall through로 왔으면 여기서 응답
-                if method == 'tools/list':
-                    resp = {
-                        'jsonrpc': '2.0', 'id': msg_id,
-                        'result': {'tools': tools}
-                    }
-                    if not _send_message(client_sock, resp):
-                        return
-                    continue
-
-            # Chromium에 메시지 전달 후 브릿지 모드 전환
-            log.info(f'[{addr}] {method} → Chromium 전달, 브릿지 모드 전환')
-            if not _send_message(cr_sock, msg):
-                log.error(f'[{addr}] Chromium 전달 실패')
-                return
-
-            # 남은 버퍼도 Chromium에 전달
-            if buf:
-                try:
-                    cr_sock.sendall(bytes(buf))
-                except Exception:
-                    return
-                buf.clear()
-
-            # 브릿지 모드: 이후 모든 데이터를 양방향 중계
-            log.info(f'[{addr}] 브릿지 시작 client ↔ Chromium')
-            t1 = threading.Thread(target=_bridge, args=(client_sock, cr_sock), daemon=True)
-            t2 = threading.Thread(target=_bridge, args=(cr_sock, client_sock), daemon=True)
-            t1.start()
-            t2.start()
-            t1.join()
-            t2.join()
-            log.info(f'[{addr}] 브릿지 종료')
+        runtime = pool.acquire(timeout=pool.acquire_timeout_sec)
+        if runtime is None:
+            log.error(f'[{addr}] 인스턴스 배정 실패 (timeout={pool.acquire_timeout_sec}s)')
             return
 
+        try:
+            backend = pool.connect_backend(runtime, for_healthcheck=False)
+            pool.mark_connect_success(runtime)
+            log.info(f'[{addr}] 세션 배정 완료 → {runtime.spec.id}')
+        except Exception as e:
+            pool.mark_connect_failure(runtime, str(e))
+            log.error(f'[{addr}] 백엔드 연결 실패 ({runtime.spec.id}): {e}')
+            return
+
+        t1 = threading.Thread(target=_bridge, args=(client_sock, backend), daemon=True)
+        t2 = threading.Thread(target=_bridge, args=(backend, client_sock), daemon=True)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
     except Exception as e:
         log.warning(f'[{addr}] 핸들러 예외: {e}')
     finally:
-        try: client_sock.close()
-        except Exception: pass
-        if cr_sock:
-            try: cr_sock.close()
-            except Exception: pass
+        _close_quietly(client_sock)
+        _close_quietly(backend)
+        if runtime is not None:
+            pool.release(runtime)
+        log.info(f'[{addr}] 연결 종료')
 
 
 # ---------------------------------------------------------------------------
 # 데몬 진입점
 # ---------------------------------------------------------------------------
 
+
 def write_pid() -> None:
     with open(PID_FILE, 'w') as f:
         f.write(str(os.getpid()))
 
 
-def cleanup(signum=None, frame=None) -> None:
+def _cleanup_files() -> None:
+    if os.path.exists(_listen_socket_path):
+        try:
+            os.unlink(_listen_socket_path)
+        except Exception:
+            pass
+    if os.path.exists(PID_FILE):
+        try:
+            os.unlink(PID_FILE)
+        except Exception:
+            pass
+
+
+def _handle_signal(signum=None, frame=None) -> None:
     global _running
     _running = False
-    log.info('데몬 종료 중...')
-    if os.path.exists(PROXY_SOCKET):
-        os.unlink(PROXY_SOCKET)
-    if os.path.exists(PID_FILE):
-        os.unlink(PID_FILE)
-    sys.exit(0)
+    log.info(f'시그널 수신({signum}) — 데몬 종료 시작')
+    if _server_socket is not None:
+        try:
+            _server_socket.close()
+        except Exception:
+            pass
 
 
 def main() -> None:
-    signal.signal(signal.SIGTERM, cleanup)
-    signal.signal(signal.SIGINT, cleanup)
+    global _server_socket, _listen_socket_path
+
+    signal.signal(signal.SIGTERM, _handle_signal)
+    signal.signal(signal.SIGINT, _handle_signal)
 
     write_pid()
-    log.info(f'=== Chromium MCP 데몬 시작 (PID={os.getpid()}) ===')
+    log.info(f'=== Chromium MCP Pool 데몬 시작 (PID={os.getpid()}) ===')
 
+    cfg = load_pool_config()
+    _listen_socket_path = cfg.listen_socket or DEFAULT_PROXY_SOCKET
     manager = ChromiumManager()
+    pool = InstancePool(cfg, manager)
 
-    # 기존 프록시 소켓 제거
-    if os.path.exists(PROXY_SOCKET):
-        os.unlink(PROXY_SOCKET)
+    if os.path.exists(_listen_socket_path):
+        os.unlink(_listen_socket_path)
 
-    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(PROXY_SOCKET)
-    os.chmod(PROXY_SOCKET, 0o600)
-    server.listen(20)
-    log.info(f'프록시 소켓 대기: {PROXY_SOCKET}')
+    _server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    _server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    _server_socket.bind(_listen_socket_path)
+    os.chmod(_listen_socket_path, 0o600)
+    _server_socket.listen(64)
+    log.info(f'프론트 소켓 대기: {_listen_socket_path}')
 
     try:
         while _running:
             try:
-                server.settimeout(1.0)
-                client_sock, _ = server.accept()
+                _server_socket.settimeout(1.0)
+                client_sock, _ = _server_socket.accept()
             except socket.timeout:
                 continue
             except Exception as e:
                 if _running:
                     log.error(f'accept 오류: {e}')
                 break
+
             threading.Thread(
                 target=handle_client,
-                args=(client_sock, manager),
+                args=(client_sock, pool),
                 daemon=True
             ).start()
     finally:
+        pool.stop()
         manager.shutdown()
-        server.close()
-        cleanup()
+        if _server_socket is not None:
+            _close_quietly(_server_socket)
+            _server_socket = None
+        _cleanup_files()
+        log.info('데몬 종료 완료')
 
 
 if __name__ == '__main__':
