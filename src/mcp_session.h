@@ -222,6 +222,10 @@ class McpSession : public content::DevToolsAgentHostClient {
   // 키: CDP 명령 ID, 값: 응답 수신 시 호출할 콜백
   std::map<int, CdpResponseCallback> pending_callbacks_;
 
+  // CDP 명령 타임아웃 (기본 60초). 응답이 없으면 에러로 콜백 호출.
+  static constexpr base::TimeDelta kCdpCommandTimeout = base::Seconds(60);
+  void OnCdpCommandTimeout(int cmd_id, const std::string& method);
+
   // 캡처된 네트워크 요청 버퍼.
   // requestId를 키로 사용하여 요청-응답 쌍을 매핑.
   std::map<std::string, NetworkRequest> captured_requests_;

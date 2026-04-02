@@ -146,6 +146,13 @@ void McpSession::SendCdpCommand(const std::string& method,
   // 콜백을 대기 맵에 등록 (응답 수신 시 cmd_id로 찾아 실행)
   pending_callbacks_[cmd_id] = std::move(callback);
 
+  // CDP 명령 타임아웃 설정: 응답이 없으면 에러 콜백 호출
+  base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
+      FROM_HERE,
+      base::BindOnce(&McpSession::OnCdpCommandTimeout,
+                     weak_factory_.GetWeakPtr(), cmd_id, method),
+      kCdpCommandTimeout);
+
   LOG(INFO) << "[McpSession] CDP 명령 전송 (id=" << cmd_id << "): " << method;
 
   // DevToolsAgentHost를 통해 CDP 명령을 브라우저 내부 IPC로 전달.
@@ -297,6 +304,19 @@ void McpSession::HandleCdpResponse(int id, const base::DictValue& message) {
     // result가 없는 응답 (예: 파라미터 없는 명령의 빈 응답)
     std::move(callback).Run(base::DictValue(), "");
   }
+}
+
+void McpSession::OnCdpCommandTimeout(int cmd_id, const std::string& method) {
+  auto it = pending_callbacks_.find(cmd_id);
+  if (it == pending_callbacks_.end()) {
+    return;  // 이미 응답 수신됨 — 정상
+  }
+  LOG(WARNING) << "[McpSession] CDP 명령 타임아웃 (id=" << cmd_id
+               << ", method=" << method << ")";
+  CdpResponseCallback callback = std::move(it->second);
+  pending_callbacks_.erase(it);
+  std::move(callback).Run(std::nullopt,
+      "CDP command timeout (" + method + ")");
 }
 
 void McpSession::HandleCdpEvent(const std::string& method,
