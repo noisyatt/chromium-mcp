@@ -695,8 +695,11 @@ void McpServer::HandleUnknownMethod(int client_id, const base::Value* id,
 
 void McpServer::SendResult(int client_id, const base::Value* id,
                             base::Value result) {
-  // 방어적 검증: content[] 형식이 아니면 텍스트로 래핑
-  if (result.is_dict() && !result.GetDict().FindList("content")) {
+  // 방어적 검증: 도구 응답에 content[]가 없으면 텍스트로 래핑
+  // 프로토콜 응답(initialize, tools/list)은 제외
+  if (result.is_dict() && !result.GetDict().FindList("content") &&
+      !result.GetDict().Find("protocolVersion") &&
+      !result.GetDict().FindList("tools")) {
     std::string json_text;
     base::JSONWriter::Write(result, &json_text);
     base::DictValue wrapped;
