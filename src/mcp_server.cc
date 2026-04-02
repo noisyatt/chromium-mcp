@@ -85,91 +85,6 @@ constexpr int kJsonRpcInvalidParams = -32602;
 namespace mcp {
 
 namespace {
-
-// 결과 Value를 MCP text content 형식으로 감싼다.
-base::Value WrapAsTextContent(base::Value raw_result, bool is_error) {
-  std::string json_text;
-  if (!base::JSONWriter::Write(std::move(raw_result), &json_text)) {
-    json_text = "{}";
-  }
-
-  base::DictValue content_item;
-  content_item.Set("type", "text");
-  content_item.Set("text", json_text);
-
-  base::ListValue content_list;
-  content_list.Append(std::move(content_item));
-
-  base::DictValue normalized;
-  normalized.Set("content", std::move(content_list));
-  if (is_error) {
-    normalized.Set("isError", true);
-  }
-  return base::Value(std::move(normalized));
-}
-
-// base64 문자열이 이미지 데이터로 보이는지 가볍게 판별한다.
-bool LooksLikeBase64ImageData(const std::string& data,
-                              const std::string* mime_type) {
-  if (data.empty()) {
-    return false;
-  }
-
-  if (mime_type &&
-      base::StartsWith(*mime_type, "image/",
-                       base::CompareCase::INSENSITIVE_ASCII)) {
-    return true;
-  }
-
-  if (base::StartsWith(data, "data:image/",
-                       base::CompareCase::INSENSITIVE_ASCII)) {
-    return true;
-  }
-
-  return base::StartsWith(data, "iVBORw0KGgo", base::CompareCase::SENSITIVE) ||
-         base::StartsWith(data, "/9j/", base::CompareCase::SENSITIVE) ||
-         base::StartsWith(data, "R0lGOD", base::CompareCase::SENSITIVE) ||
-         base::StartsWith(data, "UklGR", base::CompareCase::SENSITIVE) ||
-         base::StartsWith(data, "Qk", base::CompareCase::SENSITIVE);
-}
-
-// 도구 결과를 MCP content[] 규격으로 정규화한다.
-base::Value NormalizeToolResult(base::Value result) {
-  if (!result.is_dict()) {
-    return WrapAsTextContent(std::move(result), /*is_error=*/false);
-  }
-
-  const base::DictValue& result_dict = result.GetDict();
-
-  // 이미 MCP 포맷(content 리스트)이면 그대로 통과시킨다.
-  if (result_dict.FindList("content")) {
-    return result;
-  }
-
-  const bool is_error = result_dict.FindBool("isError").value_or(false);
-  if (is_error) {
-    return WrapAsTextContent(std::move(result), /*is_error=*/true);
-  }
-
-  const std::string* data = result_dict.FindString("data");
-  const std::string* mime_type = result_dict.FindString("mimeType");
-  if (data && LooksLikeBase64ImageData(*data, mime_type)) {
-    base::DictValue content_item;
-    content_item.Set("type", "image");
-    content_item.Set("data", *data);
-    content_item.Set("mimeType", "image/png");
-
-    base::ListValue content_list;
-    content_list.Append(std::move(content_item));
-
-    base::DictValue normalized;
-    normalized.Set("content", std::move(content_list));
-    return base::Value(std::move(normalized));
-  }
-
-  return WrapAsTextContent(std::move(result), /*is_error=*/false);
-}
-
 }  // namespace
 
 McpServer::Config::Config() = default;
@@ -780,8 +695,8 @@ void McpServer::HandleUnknownMethod(int client_id, const base::Value* id,
 
 void McpServer::SendResult(int client_id, const base::Value* id,
                             base::Value result) {
-  base::Value normalized_result = NormalizeToolResult(std::move(result));
-
+  // 도구별로 MakeJsonResult/MakeSuccessResult/MakeErrorResult/MakeImageResult를
+  // 사용하므로 여기서 추가 정규화 불필요.
   base::DictValue response;
   response.Set("jsonrpc", "2.0");
   if (id) {
@@ -789,7 +704,7 @@ void McpServer::SendResult(int client_id, const base::Value* id,
   } else {
     response.Set("id", base::Value());  // null
   }
-  response.Set("result", std::move(normalized_result));
+  response.Set("result", std::move(result));
   SendMessage(client_id, std::move(response));
 }
 

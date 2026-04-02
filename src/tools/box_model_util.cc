@@ -58,6 +58,20 @@ base::Value MakeJsonResult(base::DictValue result_dict) {
   return base::Value(std::move(result));
 }
 
+// base64 이미지를 MCP 이미지 응답으로 감싸서 반환
+base::Value MakeImageResult(const std::string& data,
+                            const std::string& mime_type) {
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue item;
+  item.Set("type", "image");
+  item.Set("data", data);
+  item.Set("mimeType", mime_type);
+  content.Append(std::move(item));
+  result.Set("content", std::move(content));
+  return base::Value(std::move(result));
+}
+
 // CDP 응답에 "error" 키가 있는지 확인한다.
 bool HasCdpError(const base::Value& response) {
   const base::DictValue* dict = response.GetIfDict();

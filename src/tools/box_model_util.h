@@ -27,6 +27,10 @@ base::Value MakeErrorResult(const std::string& message);
 // JSON Dict를 MCP 결과 Value로 감싸서 반환
 base::Value MakeJsonResult(base::DictValue result_dict);
 
+// base64 이미지를 MCP 이미지 응답으로 감싸서 반환
+base::Value MakeImageResult(const std::string& data,
+                            const std::string& mime_type = "image/png");
+
 // DOM.getDocument 응답에서 rootNodeId를 추출한다.
 int ExtractRootNodeId(const base::Value& response);
 
