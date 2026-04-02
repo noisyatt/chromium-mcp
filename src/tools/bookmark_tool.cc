@@ -266,9 +266,7 @@ base::Value BookmarkTool::ExecuteAdd(const std::string& parent_id,
   } else {
     int64_t pid = ParseNodeId(parent_id);
     if (pid < 0) {
-      base::DictValue err;
-      err.Set("error", "유효하지 않은 folderId: " + parent_id);
-      return base::Value(std::move(err));
+      return MakeErrorResult("유효하지 않은 folderId: " + parent_id);
     }
     parent = bookmarks::GetBookmarkNodeByID(model, pid);
     if (!parent || !parent->is_folder()) {

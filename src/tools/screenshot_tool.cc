@@ -114,7 +114,7 @@ void ScreenshotTool::CaptureFullPageScreenshot(
   session->SendCdpCommand(
       "Page.captureScreenshot", std::move(params),
       base::BindOnce(&ScreenshotTool::OnCaptureScreenshotResponse,
-                     weak_factory_.GetWeakPtr(), std::move(callback)));
+                     weak_factory_.GetWeakPtr(), format, std::move(callback)));
 }
 
 void ScreenshotTool::QuerySelectorForScreenshot(
@@ -264,7 +264,8 @@ void ScreenshotTool::QuerySelectorForScreenshot(
                                     "Page.captureScreenshot",
                                     std::move(cap_params),
                                     base::BindOnce(
-                                        [](base::OnceCallback<void(
+                                        [](std::string fmt,
+                                           base::OnceCallback<void(
                                                base::Value)> final_cb,
                                            base::Value cap_response) {
                                           // 최종 스크린샷 응답 처리
@@ -278,16 +279,17 @@ void ScreenshotTool::QuerySelectorForScreenshot(
                                               cap_response.GetDict().FindString(
                                                   "data");
                                           if (data) {
+                                            std::string mime = fmt == "jpeg"
+                                                ? "image/jpeg" : "image/png";
                                             std::move(final_cb).Run(
-                                                MakeImageResult(
-                                                    *data, "image/png"));
+                                                MakeImageResult(*data, mime));
                                           } else {
                                             std::move(final_cb).Run(
                                                 MakeErrorResult(
                                                     "이미지 데이터 없음"));
                                           }
                                         },
-                                        std::move(done)));
+                                        image_format, std::move(done)));
                               },
                               fmt, sess, std::move(cb)));
                     },
@@ -297,6 +299,7 @@ void ScreenshotTool::QuerySelectorForScreenshot(
 }
 
 void ScreenshotTool::OnCaptureScreenshotResponse(
+    const std::string& format,
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
   // CDP Page.captureScreenshot 응답 처리.
@@ -329,7 +332,8 @@ void ScreenshotTool::OnCaptureScreenshotResponse(
   }
 
   LOG(INFO) << "[ScreenshotTool] 스크린샷 성공, data 길이=" << data->size();
-  std::move(callback).Run(MakeImageResult(*data, "image/png"));
+  std::string mime = format == "jpeg" ? "image/jpeg" : "image/png";
+  std::move(callback).Run(MakeImageResult(*data, mime));
 }
 
 }  // namespace mcp

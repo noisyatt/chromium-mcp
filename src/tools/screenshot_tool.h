@@ -64,6 +64,7 @@ class ScreenshotTool : public McpTool {
 
   // captureScreenshot 응답을 받아 최종 결과를 구성한다.
   void OnCaptureScreenshotResponse(
+      const std::string& format,
       base::OnceCallback<void(base::Value)> callback,
       base::Value response);
 
