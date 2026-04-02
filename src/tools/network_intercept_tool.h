@@ -233,12 +233,6 @@ class NetworkInterceptTool : public McpTool {
   static base::ListValue HeaderDictToEntries(
       const base::DictValue& headers);
 
-  // 오류 응답 구조체 생성 헬퍼.
-  static base::Value MakeErrorResult(const std::string& message);
-
-  // 성공 응답 구조체 생성 헬퍼.
-  static base::Value MakeSuccessResult(const std::string& message);
-
   // =========================================================================
   // 상태 변수
   // =========================================================================

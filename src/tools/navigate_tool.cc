@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_session.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 
 namespace mcp {
 
@@ -89,9 +90,7 @@ void NavigateTool::Execute(const base::DictValue& arguments,
     const std::string* url_ptr = arguments.FindString("url");
     if (!url_ptr || url_ptr->empty()) {
       LOG(WARNING) << "[NavigateTool] action='url'인데 url 파라미터가 없음";
-      base::DictValue error;
-      error.Set("error", "url 파라미터가 필요합니다");
-      std::move(callback).Run(base::Value(std::move(error)));
+      std::move(callback).Run(MakeErrorResult("url 파라미터가 필요합니다"));
       return;
     }
 
@@ -133,10 +132,7 @@ void NavigateTool::OnNavigationCommandResponse(
       std::string error_msg = msg ? *msg : "알 수 없는 CDP 오류";
       LOG(ERROR) << "[NavigateTool] CDP 오류: " << error_msg;
 
-      base::DictValue result;
-      result.Set("success", false);
-      result.Set("error", error_msg);
-      std::move(callback).Run(base::Value(std::move(result)));
+      std::move(callback).Run(MakeErrorResult(error_msg));
       return;
     }
 
@@ -155,15 +151,13 @@ void NavigateTool::OnNavigationCommandResponse(
       result.Set("loaderId", *loader_id);
     }
 
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeJsonResult(std::move(result)));
     return;
   }
 
   // 예상치 못한 응답 형식
   LOG(WARNING) << "[NavigateTool] 예상치 못한 CDP 응답 형식";
-  base::DictValue result;
-  result.Set("success", true);  // 오류가 없으면 성공으로 간주
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeSuccessResult("네비게이션 명령 완료"));
 }
 
 }  // namespace mcp

@@ -6,10 +6,10 @@
 
 #include <utility>
 
-#include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -109,7 +109,7 @@ void TabsTool::Execute(const base::DictValue& arguments,
   if (!action || action->empty()) {
     LOG(WARNING) << "[MCP][Tabs] action 파라미터 누락";
     std::move(callback).Run(
-        MakeError("action 파라미터가 필요합니다 (list/new/close/select)"));
+        MakeErrorResult("action 파라미터가 필요합니다 (list/new/close/select)"));
     return;
   }
 
@@ -123,7 +123,7 @@ void TabsTool::Execute(const base::DictValue& arguments,
     const base::Value* tab_id_val = arguments.Find("tabId");
     if (!tab_id_val || !tab_id_val->is_int()) {
       std::move(callback).Run(
-          MakeError("action=close 에는 tabId(number) 파라미터가 필요합니다"));
+          MakeErrorResult("action=close 에는 tabId(number) 파라미터가 필요합니다"));
       return;
     }
     HandleClose(tab_id_val->GetInt(), std::move(callback));
@@ -131,14 +131,14 @@ void TabsTool::Execute(const base::DictValue& arguments,
     const base::Value* tab_id_val = arguments.Find("tabId");
     if (!tab_id_val || !tab_id_val->is_int()) {
       std::move(callback).Run(
-          MakeError("action=select 에는 tabId(number) 파라미터가 필요합니다"));
+          MakeErrorResult("action=select 에는 tabId(number) 파라미터가 필요합니다"));
       return;
     }
     HandleSelect(tab_id_val->GetInt(), std::move(callback));
   } else {
     LOG(WARNING) << "[MCP][Tabs] 알 수 없는 action: " << *action;
     std::move(callback).Run(
-        MakeError("알 수 없는 action: '" + *action +
+        MakeErrorResult("알 수 없는 action: '" + *action +
                   "'. list/new/close/select 중 하나를 사용하세요."));
   }
 }
@@ -187,21 +187,7 @@ void TabsTool::HandleList(base::OnceCallback<void(base::Value)> callback) {
   data.Set("tabCount", static_cast<int>(tabs_list.size()));
   data.Set("tabs", std::move(tabs_list));
 
-  std::string json_str;
-  base::JSONWriter::WriteWithOptions(
-      base::Value(std::move(data)),
-      base::JSONWriter::OPTIONS_PRETTY_PRINT,
-      &json_str);
-
-  base::DictValue result;
-  base::ListValue content;
-  base::DictValue content_item;
-  content_item.Set("type", "text");
-  content_item.Set("text", json_str);
-  content.Append(std::move(content_item));
-  result.Set("content", std::move(content));
-
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeJsonResult(std::move(data)));
 }
 
 void TabsTool::HandleNew(const std::string& url,
@@ -210,7 +196,7 @@ void TabsTool::HandleNew(const std::string& url,
   Browser* browser = chrome::FindLastActive();
   if (!browser) {
     LOG(ERROR) << "[MCP][Tabs] 활성 Browser 창 없음";
-    std::move(callback).Run(MakeError("열린 브라우저 창이 없습니다"));
+    std::move(callback).Run(MakeErrorResult("열린 브라우저 창이 없습니다"));
     return;
   }
 
@@ -218,7 +204,7 @@ void TabsTool::HandleNew(const std::string& url,
   GURL target_url(url.empty() ? "chrome://newtab" : url);
   if (!url.empty() && !target_url.is_valid()) {
     LOG(WARNING) << "[MCP][Tabs] 유효하지 않은 URL: " << url;
-    std::move(callback).Run(MakeError("유효하지 않은 URL: " + url));
+    std::move(callback).Run(MakeErrorResult("유효하지 않은 URL: " + url));
     return;
   }
 
@@ -238,18 +224,7 @@ void TabsTool::HandleNew(const std::string& url,
         browser->window()->Activate();
 
         base::DictValue tab_info = SerializeTab(wc, i, true);
-        std::string json_str;
-        base::JSONWriter::WriteWithOptions(
-            base::Value(std::move(tab_info)),
-            base::JSONWriter::OPTIONS_PRETTY_PRINT, &json_str);
-        base::DictValue result;
-        base::DictValue content_item;
-        content_item.Set("type", "text");
-        content_item.Set("text", json_str);
-        base::ListValue content;
-        content.Append(std::move(content_item));
-        result.Set("content", std::move(content));
-        std::move(callback).Run(base::Value(std::move(result)));
+        std::move(callback).Run(MakeJsonResult(std::move(tab_info)));
         return;
       }
     }
@@ -273,7 +248,7 @@ void TabsTool::HandleNew(const std::string& url,
     // Navigate()가 탭을 생성했지만 포인터를 반환하지 않은 경우
     LOG(WARNING) << "[MCP][Tabs] 새 탭 WebContents 포인터를 얻지 못함";
     std::move(callback).Run(
-        MakeSuccess("새 탭이 열렸습니다: " + target_url.spec()));
+        MakeSuccessResult("새 탭이 열렸습니다: " + target_url.spec()));
     return;
   }
 
@@ -288,7 +263,7 @@ void TabsTool::HandleNew(const std::string& url,
       base::JSONWriter::OPTIONS_PRETTY_PRINT,
       &json_str);
 
-  std::move(callback).Run(MakeSuccess("새 탭이 열렸습니다:\n" + json_str));
+  std::move(callback).Run(MakeSuccessResult("새 탭이 열렸습니다:\n" + json_str));
 }
 
 void TabsTool::HandleClose(int tab_id,
@@ -321,7 +296,7 @@ void TabsTool::HandleClose(int tab_id,
                                       TabCloseTypes::CLOSE_USER_GESTURE);
 
         std::move(callback).Run(
-            MakeSuccess("탭을 닫았습니다 (id: " +
+            MakeSuccessResult("탭을 닫았습니다 (id: " +
                         std::to_string(tab_id) + ")"));
         return;
       }
@@ -331,7 +306,7 @@ void TabsTool::HandleClose(int tab_id,
   // 해당 tabId를 찾지 못한 경우
   LOG(WARNING) << "[MCP][Tabs] tabId=" << tab_id << " 탭을 찾을 수 없음";
   std::move(callback).Run(
-      MakeError("tabId=" + std::to_string(tab_id) +
+      MakeErrorResult("tabId=" + std::to_string(tab_id) +
                 " 에 해당하는 탭을 찾을 수 없습니다. "
                 "action=list로 현재 탭 목록을 확인하세요."));
 }
@@ -379,7 +354,7 @@ void TabsTool::HandleSelect(int tab_id,
             &json_str);
 
         std::move(callback).Run(
-            MakeSuccess("탭을 활성화했습니다:\n" + json_str));
+            MakeSuccessResult("탭을 활성화했습니다:\n" + json_str));
         return;
       }
     }
@@ -388,7 +363,7 @@ void TabsTool::HandleSelect(int tab_id,
   // 해당 tabId를 찾지 못한 경우
   LOG(WARNING) << "[MCP][Tabs] tabId=" << tab_id << " 탭을 찾을 수 없음";
   std::move(callback).Run(
-      MakeError("tabId=" + std::to_string(tab_id) +
+      MakeErrorResult("tabId=" + std::to_string(tab_id) +
                 " 에 해당하는 탭을 찾을 수 없습니다. "
                 "action=list로 현재 탭 목록을 확인하세요."));
 }
@@ -445,29 +420,5 @@ base::DictValue TabsTool::SerializeTab(
   return dict;
 }
 
-// static
-base::Value TabsTool::MakeError(const std::string& message) {
-  base::DictValue result;
-  result.Set("isError", true);
-  base::ListValue content;
-  base::DictValue content_item;
-  content_item.Set("type", "text");
-  content_item.Set("text", "오류: " + message);
-  content.Append(std::move(content_item));
-  result.Set("content", std::move(content));
-  return base::Value(std::move(result));
-}
-
-// static
-base::Value TabsTool::MakeSuccess(const std::string& text) {
-  base::DictValue result;
-  base::ListValue content;
-  base::DictValue content_item;
-  content_item.Set("type", "text");
-  content_item.Set("text", text);
-  content.Append(std::move(content_item));
-  result.Set("content", std::move(content));
-  return base::Value(std::move(result));
-}
 
 }  // namespace mcp

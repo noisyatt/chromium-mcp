@@ -6,10 +6,10 @@
 
 #include <utility>
 
-#include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/channel_info.h"
@@ -94,24 +94,9 @@ void BrowserInfoTool::Execute(
     info.Set("activeTab", base::Value());
   }
 
-  // ── 결과 직렬화 ────────────────────────────────────────────────────────────
-  std::string json_str;
-  base::JSONWriter::WriteWithOptions(
-      base::Value(std::move(info)),
-      base::JSONWriter::OPTIONS_PRETTY_PRINT,
-      &json_str);
-
   LOG(INFO) << "[MCP][BrowserInfo] 브라우저 정보 수집 완료";
 
-  base::DictValue result;
-  base::ListValue content;
-  base::DictValue content_item;
-  content_item.Set("type", "text");
-  content_item.Set("text", json_str);
-  content.Append(std::move(content_item));
-  result.Set("content", std::move(content));
-
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeJsonResult(std::move(info)));
 }
 
 // static
