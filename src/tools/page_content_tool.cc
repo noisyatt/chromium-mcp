@@ -87,9 +87,7 @@ void PageContentTool::Execute(const base::DictValue& arguments,
 
   } else {
     LOG(WARNING) << "[PageContentTool] 알 수 없는 mode: " << mode;
-    base::DictValue err;
-    err.Set("error", "지원하지 않는 mode: " + mode);
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeErrorResult("지원하지 않는 mode: " + mode));
   }
 }
 
@@ -117,9 +115,7 @@ void PageContentTool::OnAccessibilityTreeResponse(
     base::Value response) {
   if (!response.is_dict()) {
     LOG(ERROR) << "[PageContentTool] Accessibility.getFullAXTree 응답 오류";
-    base::DictValue err;
-    err.Set("error", "Accessibility.getFullAXTree 실패");
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeErrorResult("Accessibility.getFullAXTree 실패"));
     return;
   }
 
@@ -131,9 +127,7 @@ void PageContentTool::OnAccessibilityTreeResponse(
     const std::string* msg = error_dict->FindString("message");
     std::string error_msg = msg ? *msg : "알 수 없는 CDP 오류";
     LOG(ERROR) << "[PageContentTool] AX tree CDP 오류: " << error_msg;
-    base::DictValue err;
-    err.Set("error", error_msg);
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeErrorResult(error_msg));
     return;
   }
 
@@ -182,26 +176,20 @@ void PageContentTool::OnGetDocumentResponse(
     base::Value response) {
   if (!response.is_dict()) {
     LOG(ERROR) << "[PageContentTool] DOM.getDocument 응답 오류";
-    base::DictValue err;
-    err.Set("error", "DOM.getDocument 실패");
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeErrorResult("DOM.getDocument 실패"));
     return;
   }
 
   const base::DictValue* root = response.GetDict().FindDict("root");
   if (!root) {
     LOG(ERROR) << "[PageContentTool] DOM root 없음";
-    base::DictValue err;
-    err.Set("error", "DOM 루트 노드 없음");
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeErrorResult("DOM 루트 노드 없음"));
     return;
   }
 
   std::optional<int> root_node_id = root->FindInt("nodeId");
   if (!root_node_id) {
-    base::DictValue err;
-    err.Set("error", "루트 nodeId 추출 실패");
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeErrorResult("루트 nodeId 추출 실패"));
     return;
   }
 
@@ -227,9 +215,7 @@ void PageContentTool::OnGetDocumentResponse(
                base::OnceCallback<void(base::Value)> cb,
                base::Value qs_response) {
               if (!qs_response.is_dict()) {
-                base::DictValue err;
-                err.Set("error", "DOM.querySelector 실패");
-                std::move(cb).Run(base::Value(std::move(err)));
+                std::move(cb).Run(MakeErrorResult("DOM.querySelector 실패"));
                 return;
               }
 
@@ -237,9 +223,7 @@ void PageContentTool::OnGetDocumentResponse(
                   qs_response.GetDict().FindInt("nodeId");
               if (!node_id || *node_id == 0) {
                 LOG(WARNING) << "[PageContentTool] selector 요소 없음";
-                base::DictValue err;
-                err.Set("error", "해당 selector의 요소를 찾을 수 없음");
-                std::move(cb).Run(base::Value(std::move(err)));
+                std::move(cb).Run(MakeErrorResult("해당 selector의 요소를 찾을 수 없음"));
                 return;
               }
 
@@ -252,9 +236,7 @@ void PageContentTool::OnGetDocumentResponse(
                       [](base::OnceCallback<void(base::Value)> done,
                          base::Value outer_response) {
                         if (!outer_response.is_dict()) {
-                          base::DictValue err;
-                          err.Set("error", "DOM.getOuterHTML 실패");
-                          std::move(done).Run(base::Value(std::move(err)));
+                          std::move(done).Run(MakeErrorResult("DOM.getOuterHTML 실패"));
                           return;
                         }
                         const std::string* html =
@@ -275,9 +257,7 @@ void PageContentTool::OnGetOuterHtmlResponse(
     base::Value response) {
   if (!response.is_dict()) {
     LOG(ERROR) << "[PageContentTool] DOM.getOuterHTML 응답 오류";
-    base::DictValue err;
-    err.Set("error", "DOM.getOuterHTML 실패");
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeErrorResult("DOM.getOuterHTML 실패"));
     return;
   }
 
@@ -289,9 +269,7 @@ void PageContentTool::OnGetOuterHtmlResponse(
     const std::string* msg = error_dict->FindString("message");
     std::string error_msg = msg ? *msg : "알 수 없는 CDP 오류";
     LOG(ERROR) << "[PageContentTool] getOuterHTML CDP 오류: " << error_msg;
-    base::DictValue err;
-    err.Set("error", error_msg);
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeErrorResult(error_msg));
     return;
   }
 
@@ -351,9 +329,7 @@ void PageContentTool::OnEvaluateResponse(
     base::Value response) {
   if (!response.is_dict()) {
     LOG(ERROR) << "[PageContentTool] Runtime.evaluate 응답 오류";
-    base::DictValue err;
-    err.Set("error", "Runtime.evaluate 실패");
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeErrorResult("Runtime.evaluate 실패"));
     return;
   }
 
@@ -365,9 +341,7 @@ void PageContentTool::OnEvaluateResponse(
     const std::string* msg = error_dict->FindString("message");
     std::string error_msg = msg ? *msg : "알 수 없는 CDP 오류";
     LOG(ERROR) << "[PageContentTool] Runtime.evaluate CDP 오류: " << error_msg;
-    base::DictValue err;
-    err.Set("error", error_msg);
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeErrorResult(error_msg));
     return;
   }
 
@@ -377,9 +351,7 @@ void PageContentTool::OnEvaluateResponse(
     const std::string* ex_text = exception->FindString("text");
     std::string ex_msg = ex_text ? *ex_text : "JS 실행 오류";
     LOG(WARNING) << "[PageContentTool] JS 예외: " << ex_msg;
-    base::DictValue err;
-    err.Set("error", "JS 실행 오류: " + ex_msg);
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeErrorResult("JS 실행 오류: " + ex_msg));
     return;
   }
 

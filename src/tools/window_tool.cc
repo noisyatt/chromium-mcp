@@ -108,11 +108,9 @@ void WindowTool::Execute(const base::DictValue& arguments,
                          base::OnceCallback<void(base::Value)> callback) {
   const std::string* action_ptr = arguments.FindString("action");
   if (!action_ptr || action_ptr->empty()) {
-    base::DictValue err;
-    err.Set("error",
-            "action 파라미터가 필요합니다: "
-            "resize/move/minimize/maximize/fullscreen/restore/getBounds/list");
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeErrorResult(
+        "action 파라미터가 필요합니다: "
+        "resize/move/minimize/maximize/fullscreen/restore/getBounds/list"));
     return;
   }
   const std::string& action = *action_ptr;
@@ -154,11 +152,9 @@ void WindowTool::OnGetWindowForTarget(
   int window_id = ExtractWindowId(response);
   if (window_id < 0) {
     LOG(ERROR) << "[WindowTool] getWindowForTarget 실패 또는 windowId 없음";
-    base::DictValue err;
-    err.Set("error",
-            "현재 탭의 윈도우 ID를 가져오지 못했습니다. "
-            "windowId 파라미터를 직접 지정해 주세요");
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeErrorResult(
+        "현재 탭의 윈도우 ID를 가져오지 못했습니다. "
+        "windowId 파라미터를 직접 지정해 주세요"));
     return;
   }
   LOG(INFO) << "[WindowTool] 자동 조회된 windowId: " << window_id;
@@ -176,9 +172,8 @@ void WindowTool::ExecuteWithWindowId(
     std::optional<double> width  = arguments.FindDouble("width");
     std::optional<double> height = arguments.FindDouble("height");
     if (!width.has_value() || !height.has_value()) {
-      base::DictValue err;
-      err.Set("error", "action=resize에는 width와 height가 필요합니다");
-      std::move(callback).Run(base::Value(std::move(err)));
+      std::move(callback).Run(
+          MakeErrorResult("action=resize에는 width와 height가 필요합니다"));
       return;
     }
     ExecuteResize(window_id,
@@ -192,9 +187,8 @@ void WindowTool::ExecuteWithWindowId(
     std::optional<double> x = arguments.FindDouble("x");
     std::optional<double> y = arguments.FindDouble("y");
     if (!x.has_value() || !y.has_value()) {
-      base::DictValue err;
-      err.Set("error", "action=move에는 x와 y가 필요합니다");
-      std::move(callback).Run(base::Value(std::move(err)));
+      std::move(callback).Run(
+          MakeErrorResult("action=move에는 x와 y가 필요합니다"));
       return;
     }
     ExecuteMove(window_id,
@@ -226,12 +220,10 @@ void WindowTool::ExecuteWithWindowId(
   }
 
   // 알 수 없는 action
-  base::DictValue err;
-  err.Set("error",
-          "유효하지 않은 action: " + action +
-          ". resize/move/minimize/maximize/fullscreen/restore/"
-          "getBounds/list 중 하나를 사용하세요");
-  std::move(callback).Run(base::Value(std::move(err)));
+  std::move(callback).Run(MakeErrorResult(
+      "유효하지 않은 action: " + action +
+      ". resize/move/minimize/maximize/fullscreen/restore/"
+      "getBounds/list 중 하나를 사용하세요"));
 }
 
 void WindowTool::ExecuteResize(int window_id,
@@ -339,9 +331,8 @@ void WindowTool::ExecuteList(McpSession* session,
              base::Value response) {
             int window_id = ExtractWindowId(response);
             if (window_id < 0) {
-              base::DictValue err;
-              err.Set("error", "현재 탭의 윈도우 ID를 가져오지 못했습니다");
-              std::move(callback).Run(base::Value(std::move(err)));
+              std::move(callback).Run(MakeErrorResult(
+                  "현재 탭의 윈도우 ID를 가져오지 못했습니다"));
               return;
             }
             if (!weak_self) {
@@ -412,9 +403,8 @@ void WindowTool::OnSetWindowBoundsResponse(
     const std::string& action,
     base::Value response) {
   if (!response.is_dict()) {
-    base::DictValue err;
-    err.Set("error", "Browser.setWindowBounds 응답 형식 오류");
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(
+        MakeErrorResult("Browser.setWindowBounds 응답 형식 오류"));
     return;
   }
 
@@ -424,10 +414,7 @@ void WindowTool::OnSetWindowBoundsResponse(
     const std::string* msg = err_dict->FindString("message");
     std::string err_msg = msg ? *msg : "윈도우 조작 실패";
     LOG(ERROR) << "[WindowTool] " << action << " 실패: " << err_msg;
-    base::DictValue result;
-    result.Set("success", false);
-    result.Set("error", err_msg);
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeErrorResult(err_msg));
     return;
   }
 
@@ -443,9 +430,8 @@ void WindowTool::OnGetWindowBoundsResponse(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
   if (!response.is_dict()) {
-    base::DictValue err;
-    err.Set("error", "Browser.getWindowBounds 응답 형식 오류");
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(
+        MakeErrorResult("Browser.getWindowBounds 응답 형식 오류"));
     return;
   }
 
@@ -457,10 +443,7 @@ void WindowTool::OnGetWindowBoundsResponse(
     const std::string* msg = err_dict->FindString("message");
     std::string err_msg = msg ? *msg : "윈도우 bounds 조회 실패";
     LOG(ERROR) << "[WindowTool] getBounds 실패: " << err_msg;
-    base::DictValue result;
-    result.Set("success", false);
-    result.Set("error", err_msg);
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeErrorResult(err_msg));
     return;
   }
 

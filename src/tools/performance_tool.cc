@@ -113,9 +113,7 @@ void PerformanceTool::Execute(const base::DictValue& arguments,
                                base::OnceCallback<void(base::Value)> callback) {
   const std::string* action_ptr = arguments.FindString("action");
   if (!action_ptr) {
-    base::DictValue err;
-    err.Set("error", "action 파라미터가 필요합니다");
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeErrorResult("action 파라미터가 필요합니다"));
     return;
   }
 
@@ -139,9 +137,7 @@ void PerformanceTool::Execute(const base::DictValue& arguments,
     ExecuteGetNavigationTiming(session, std::move(callback));
 
   } else {
-    base::DictValue err;
-    err.Set("error", "알 수 없는 action: " + action);
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeErrorResult("알 수 없는 action: " + action));
   }
 }
 
@@ -173,9 +169,7 @@ void PerformanceTool::OnMetricsReceived(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
   if (!response.is_dict()) {
-    base::DictValue result;
-    result.Set("error", "예상치 못한 CDP 응답 형식");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeErrorResult("예상치 못한 CDP 응답 형식"));
     return;
   }
 
@@ -185,9 +179,8 @@ void PerformanceTool::OnMetricsReceived(
   const base::DictValue* err = dict.FindDict("error");
   if (err) {
     const std::string* msg = err->FindString("message");
-    base::DictValue result;
-    result.Set("error", msg ? *msg : "Performance.getMetrics 실패");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(
+        MakeErrorResult(msg ? *msg : "Performance.getMetrics 실패"));
     return;
   }
 
@@ -238,10 +231,8 @@ void PerformanceTool::ExecuteStartTrace(
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   if (is_tracing_) {
-    base::DictValue result;
-    result.Set("success", false);
-    result.Set("error", "이미 트레이스가 진행 중입니다. stopTrace를 먼저 호출하세요.");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeErrorResult(
+        "이미 트레이스가 진행 중입니다. stopTrace를 먼저 호출하세요."));
     return;
   }
 
@@ -290,10 +281,8 @@ void PerformanceTool::OnTraceStarted(
         tracing_session_ = nullptr;
       }
 
-      base::DictValue result;
-      result.Set("success", false);
-      result.Set("error", msg ? *msg : "트레이스 시작 실패");
-      std::move(callback).Run(base::Value(std::move(result)));
+      std::move(callback).Run(
+          MakeErrorResult(msg ? *msg : "트레이스 시작 실패"));
       return;
     }
   }
@@ -425,11 +414,8 @@ void PerformanceTool::ExecuteStopTrace(
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   if (!is_tracing_) {
-    base::DictValue result;
-    result.Set("success", false);
-    result.Set("error",
-               "진행 중인 트레이스가 없습니다. startTrace를 먼저 호출하세요.");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeErrorResult(
+        "진행 중인 트레이스가 없습니다. startTrace를 먼저 호출하세요."));
     return;
   }
 
@@ -478,10 +464,8 @@ void PerformanceTool::OnTraceEnded(
       save_path_.clear();
 
       if (stop_trace_callback_) {
-        base::DictValue result;
-        result.Set("success", false);
-        result.Set("error", msg ? *msg : "Tracing.end 실패");
-        std::move(stop_trace_callback_).Run(base::Value(std::move(result)));
+        std::move(stop_trace_callback_).Run(
+            MakeErrorResult(msg ? *msg : "Tracing.end 실패"));
       }
     }
   }
@@ -581,9 +565,7 @@ void PerformanceTool::OnNavigationTimingReceived(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
   if (!response.is_dict()) {
-    base::DictValue result;
-    result.Set("error", "예상치 못한 CDP 응답 형식");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeErrorResult("예상치 못한 CDP 응답 형식"));
     return;
   }
 
@@ -591,9 +573,8 @@ void PerformanceTool::OnNavigationTimingReceived(
   const base::DictValue* err = dict.FindDict("error");
   if (err) {
     const std::string* msg = err->FindString("message");
-    base::DictValue result;
-    result.Set("error", msg ? *msg : "Runtime.evaluate 실패");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(
+        MakeErrorResult(msg ? *msg : "Runtime.evaluate 실패"));
     return;
   }
 
@@ -614,10 +595,8 @@ void PerformanceTool::OnNavigationTimingReceived(
     }
   }
 
-  base::DictValue result;
-  result.Set("success", false);
-  result.Set("error", "Navigation Timing 데이터를 파싱할 수 없습니다");
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(
+      MakeErrorResult("Navigation Timing 데이터를 파싱할 수 없습니다"));
 }
 
 // -----------------------------------------------------------------------

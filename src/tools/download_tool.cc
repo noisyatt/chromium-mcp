@@ -10,6 +10,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_session.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 
 namespace mcp {
 
@@ -92,9 +93,7 @@ void DownloadTool::Execute(const base::DictValue& arguments,
                            base::OnceCallback<void(base::Value)> callback) {
   const std::string* action_ptr = arguments.FindString("action");
   if (!action_ptr) {
-    base::DictValue err;
-    err.Set("error", "action 파라미터가 필요합니다");
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeErrorResult("action 파라미터가 필요합니다"));
     return;
   }
 
@@ -104,9 +103,7 @@ void DownloadTool::Execute(const base::DictValue& arguments,
   if (action == "start") {
     const std::string* url_ptr = arguments.FindString("url");
     if (!url_ptr || url_ptr->empty()) {
-      base::DictValue err;
-      err.Set("error", "start 액션에는 url 파라미터가 필요합니다");
-      std::move(callback).Run(base::Value(std::move(err)));
+      std::move(callback).Run(MakeErrorResult("start 액션에는 url 파라미터가 필요합니다"));
       return;
     }
     const std::string* path_ptr = arguments.FindString("savePath");
@@ -119,9 +116,7 @@ void DownloadTool::Execute(const base::DictValue& arguments,
   } else if (action == "cancel") {
     std::optional<int> id_opt = arguments.FindInt("downloadId");
     if (!id_opt.has_value()) {
-      base::DictValue err;
-      err.Set("error", "cancel 액션에는 downloadId 파라미터가 필요합니다");
-      std::move(callback).Run(base::Value(std::move(err)));
+      std::move(callback).Run(MakeErrorResult("cancel 액션에는 downloadId 파라미터가 필요합니다"));
       return;
     }
     ExecuteCancel(*id_opt, session, std::move(callback));
@@ -129,17 +124,13 @@ void DownloadTool::Execute(const base::DictValue& arguments,
   } else if (action == "setPath") {
     const std::string* path_ptr = arguments.FindString("savePath");
     if (!path_ptr || path_ptr->empty()) {
-      base::DictValue err;
-      err.Set("error", "setPath 액션에는 savePath 파라미터가 필요합니다");
-      std::move(callback).Run(base::Value(std::move(err)));
+      std::move(callback).Run(MakeErrorResult("setPath 액션에는 savePath 파라미터가 필요합니다"));
       return;
     }
     ExecuteSetPath(*path_ptr, session, std::move(callback));
 
   } else {
-    base::DictValue err;
-    err.Set("error", "알 수 없는 action: " + action);
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeErrorResult("알 수 없는 action: " + action));
   }
 }
 
@@ -266,10 +257,7 @@ void DownloadTool::OnDownloadTriggered(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
   if (!response.is_dict()) {
-    base::DictValue result;
-    result.Set("success", false);
-    result.Set("error", "예상치 못한 CDP 응답 형식");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeErrorResult("예상치 못한 CDP 응답 형식"));
     return;
   }
 
@@ -277,10 +265,7 @@ void DownloadTool::OnDownloadTriggered(
   const base::DictValue* error_dict = dict.FindDict("error");
   if (error_dict) {
     const std::string* msg = error_dict->FindString("message");
-    base::DictValue result;
-    result.Set("success", false);
-    result.Set("error", msg ? *msg : "CDP 오류");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeErrorResult(msg ? *msg : "CDP 오류"));
     return;
   }
 
@@ -299,7 +284,7 @@ void DownloadTool::OnDownloadTriggered(
     }
   }
 
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeJsonResult(std::move(result)));
 }
 
 // -----------------------------------------------------------------------------
@@ -422,10 +407,7 @@ void DownloadTool::OnCdpActionResult(
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
   if (!response.is_dict()) {
-    base::DictValue result;
-    result.Set("success", false);
-    result.Set("error", "예상치 못한 CDP 응답 형식");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeErrorResult("예상치 못한 CDP 응답 형식"));
     return;
   }
 
@@ -434,10 +416,7 @@ void DownloadTool::OnCdpActionResult(
   const base::DictValue* error_dict = dict.FindDict("error");
   if (error_dict) {
     const std::string* msg = error_dict->FindString("message");
-    base::DictValue result;
-    result.Set("success", false);
-    result.Set("error", msg ? *msg : "CDP 오류");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeErrorResult(msg ? *msg : "CDP 오류"));
     return;
   }
 
@@ -449,14 +428,12 @@ void DownloadTool::OnCdpActionResult(
       base::DictValue result;
       result.Set("success", true);
       result.Set("data", *value_str);
-      std::move(callback).Run(base::Value(std::move(result)));
+      std::move(callback).Run(MakeJsonResult(std::move(result)));
       return;
     }
   }
 
-  base::DictValue result;
-  result.Set("success", true);
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeSuccessResult("작업이 완료되었습니다"));
 }
 
 }  // namespace mcp
