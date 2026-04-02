@@ -307,6 +307,7 @@ class PoolConfig:
     healthcheck_interval_sec: float = 30.0
     healthcheck_failure_threshold: int = 3
     healthcheck_cooldown_sec: float = 60.0
+    max_connections: int = 64
     instances: list[InstanceSpec] = field(default_factory=list)
 
 
@@ -392,7 +393,7 @@ class InstancePool:
                 self._refresh_cooldown_locked(now)
                 candidates = self._select_candidates_locked()
                 if candidates:
-                    chosen = min(candidates, key=lambda rt: (rt.last_assigned_at, rt.spec.id))
+                    chosen = min(candidates, key=lambda rt: (rt.active_sessions, rt.last_assigned_at, rt.spec.id))
                     chosen.active_sessions += 1
                     chosen.last_assigned_at = now
                     if chosen.spec.capacity > 0 and chosen.active_sessions >= chosen.spec.capacity:
@@ -575,19 +576,25 @@ def _close_quietly(obj) -> None:
         pass
 
 
-def _bridge(src, dst, label: str = '') -> None:
-    """src → dst 단방향 relay. MCP 프레이밍은 그대로 통과시킨다."""
+def _bridge(src, dst, label: str = '', stop_event: threading.Event | None = None) -> None:
+    """src → dst 단방향 relay. stop_event로 상대 bridge 종료를 감지한다."""
     try:
-        while True:
-            data = src.recv(65536)
-            if not data:
-                log.debug(f'[bridge:{label}] EOF from src')
+        while not (stop_event and stop_event.is_set()):
+            src.settimeout(5.0)
+            try:
+                data = src.recv(65536)
+            except socket.timeout:
+                continue
+            except OSError:
                 break
-            log.debug(f'[bridge:{label}] relay {len(data)} bytes')
+            if not data:
+                break
             dst.sendall(data)
-    except Exception as e:
-        log.debug(f'[bridge:{label}] exception: {e}')
+    except Exception:
+        pass
     finally:
+        if stop_event:
+            stop_event.set()
         try:
             dst.shutdown(socket.SHUT_WR)
         except Exception:
@@ -771,6 +778,7 @@ def load_pool_config() -> PoolConfig:
         healthcheck_interval_sec=float(healthcheck.get('interval_sec', 30)),
         healthcheck_failure_threshold=int(healthcheck.get('failure_threshold', 3)),
         healthcheck_cooldown_sec=float(healthcheck.get('cooldown_sec', 60)),
+        max_connections=int(raw.get('max_connections', 64)),
         instances=[]
     )
 
@@ -786,7 +794,7 @@ def load_pool_config() -> PoolConfig:
         spec = InstanceSpec(
             id=str(item.get('id', f'instance-{len(cfg.instances) + 1}')),
             transport=transport,
-            capacity=max(0, int(item.get('capacity', 0))),
+            capacity=max(0, int(item.get('capacity', 1))),
             enabled=bool(item.get('enabled', True)),
             socket=str(item.get('socket', CHROMIUM_SOCKET)),
             host=str(item.get('host', '')),
@@ -817,7 +825,8 @@ def load_pool_config() -> PoolConfig:
 # ---------------------------------------------------------------------------
 
 
-def handle_client(client_sock: socket.socket, pool: InstancePool) -> None:
+def handle_client(client_sock: socket.socket, pool: InstancePool,
+                   conn_semaphore: threading.Semaphore | None = None) -> None:
     """새 클라이언트 연결을 풀 인스턴스에 배정하고 raw relay를 수행한다."""
     addr = id(client_sock)
     runtime: InstanceRuntime | None = None
@@ -839,12 +848,13 @@ def handle_client(client_sock: socket.socket, pool: InstancePool) -> None:
             log.error(f'[{addr}] 백엔드 연결 실패 ({runtime.spec.id}): {e}')
             return
 
-        t1 = threading.Thread(target=_bridge, args=(client_sock, backend, f'{addr}:c→b'), daemon=True)
-        t2 = threading.Thread(target=_bridge, args=(backend, client_sock, f'{addr}:b→c'), daemon=True)
+        stop = threading.Event()
+        t1 = threading.Thread(target=_bridge, args=(client_sock, backend, f'{addr}:c→b', stop), daemon=True)
+        t2 = threading.Thread(target=_bridge, args=(backend, client_sock, f'{addr}:b→c', stop), daemon=True)
         t1.start()
         t2.start()
-        t1.join()
-        t2.join()
+        t1.join(timeout=None)  # 첫 번째 bridge 종료 대기 (stop_event로 상대방에 전파)
+        t2.join(timeout=10)    # 상대 bridge 10초 내 종료 대기
     except Exception as e:
         log.warning(f'[{addr}] 핸들러 예외: {e}')
     finally:
@@ -852,6 +862,8 @@ def handle_client(client_sock: socket.socket, pool: InstancePool) -> None:
         _close_quietly(backend)
         if runtime is not None:
             pool.release(runtime)
+        if conn_semaphore is not None:
+            conn_semaphore.release()
         log.info(f'[{addr}] 연결 종료')
 
 
@@ -929,7 +941,8 @@ def main() -> None:
     _server_socket.bind(_listen_socket_path)
     os.chmod(_listen_socket_path, 0o600)
     _server_socket.listen(64)
-    log.info(f'프론트 소켓 대기: {_listen_socket_path}')
+    conn_semaphore = threading.Semaphore(cfg.max_connections) if cfg.max_connections > 0 else None
+    log.info(f'프론트 소켓 대기: {_listen_socket_path} (max_connections={cfg.max_connections or "unlimited"})')
 
     try:
         while _running:
@@ -943,9 +956,14 @@ def main() -> None:
                     log.error(f'accept 오류: {e}')
                 break
 
+            if conn_semaphore is not None and not conn_semaphore.acquire(blocking=False):
+                log.warning(f'최대 연결 수 초과 ({cfg.max_connections}) — 연결 거부')
+                _close_quietly(client_sock)
+                continue
+
             threading.Thread(
                 target=handle_client,
-                args=(client_sock, pool),
+                args=(client_sock, pool, conn_semaphore),
                 daemon=True
             ).start()
     finally:
