@@ -416,11 +416,14 @@ void EmulationTool::Execute(const base::DictValue& arguments,
   // 설정할 항목이 없으면 즉시 오류 반환
   if (ctx->commands.empty() && ctx->errors.empty()) {
     LOG(WARNING) << "[EmulationTool] 설정할 에뮬레이션 파라미터 없음";
-    std::move(ctx->callback).Run(MakeErrorResult(
-        "설정할 에뮬레이션 파라미터가 없습니다. "
-        "viewport/geolocation/colorScheme/timezone/locale/"
-        "userAgent/cpuThrottling/networkConditions/reset 중 "
-        "하나 이상을 지정하세요"));
+    base::DictValue result;
+    result.Set("success", false);
+    result.Set("error",
+               "설정할 에뮬레이션 파라미터가 없습니다. "
+               "viewport/geolocation/colorScheme/timezone/locale/"
+               "userAgent/cpuThrottling/networkConditions/reset 중 "
+               "하나 이상을 지정하세요");
+    std::move(ctx->callback).Run(base::Value(std::move(result)));
     return;
   }
 
@@ -537,8 +540,7 @@ void EmulationTool::ExecuteNextCommand(std::unique_ptr<ExecuteContext> ctx,
     if (ctx->errors.empty()) {
       std::move(ctx->callback).Run(MakeJsonResult(std::move(result)));
     } else {
-      // 에러가 있으면 에러 목록을 포함한 JSON 결과로 반환
-      std::move(ctx->callback).Run(MakeJsonResult(std::move(result)));
+      std::move(ctx->callback).Run(base::Value(std::move(result)));
     }
     return;
   }

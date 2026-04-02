@@ -115,7 +115,7 @@ class CoverageTool : public McpTool {
                           base::Value response);
 
   // Profiler.stopPreciseCoverage + Profiler.disable 응답 처리 (정리)
-  void OnJsCoverageStopped(base::Value response);
+  void OnJsCoverageStopped(McpSession* session, base::Value response);
   void OnProfilerDisabled(base::Value response);
 
   // -----------------------------------------------------------------------

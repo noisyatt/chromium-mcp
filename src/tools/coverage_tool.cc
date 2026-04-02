@@ -414,7 +414,7 @@ void CoverageTool::OnJsCoverageTaken(
   session->SendCdpCommand(
       "Profiler.stopPreciseCoverage", base::DictValue(),
       base::BindOnce(&CoverageTool::OnJsCoverageStopped,
-                     weak_factory_.GetWeakPtr()));
+                     weak_factory_.GetWeakPtr(), session));
 
   if (!response.is_dict()) {
     base::DictValue result;
@@ -462,9 +462,14 @@ void CoverageTool::OnJsCoverageTaken(
   std::move(callback).Run(MakeJsonResult(std::move(result)));
 }
 
-void CoverageTool::OnJsCoverageStopped(base::Value response) {
+void CoverageTool::OnJsCoverageStopped(McpSession* session,
+                                       base::Value response) {
   // Profiler.stopPreciseCoverage 완료 후 Profiler.disable 호출
-  // 이 응답은 정리 목적으로만 사용됨
+  if (!session) return;
+  session->SendCdpCommand(
+      "Profiler.disable", base::DictValue(),
+      base::BindOnce(&CoverageTool::OnProfilerDisabled,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void CoverageTool::OnProfilerDisabled(base::Value response) {

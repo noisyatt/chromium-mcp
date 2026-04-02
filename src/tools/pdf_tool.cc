@@ -281,8 +281,9 @@ void PdfTool::OnPrintToPdfResponse(
     base::Value response) {
   if (!response.is_dict()) {
     LOG(ERROR) << "[PdfTool] Page.printToPDF 응답 형식 오류";
-    std::move(callback).Run(
-        MakeErrorResult("Page.printToPDF 응답 형식 오류"));
+    base::DictValue err;
+    err.Set("error", "Page.printToPDF 응답 형식 오류");
+    std::move(callback).Run(base::Value(std::move(err)));
     return;
   }
 
@@ -294,7 +295,10 @@ void PdfTool::OnPrintToPdfResponse(
     const std::string* msg = err_dict->FindString("message");
     std::string err_msg = msg ? *msg : "PDF 변환 실패";
     LOG(ERROR) << "[PdfTool] CDP 오류: " << err_msg;
-    std::move(callback).Run(MakeErrorResult(err_msg));
+    base::DictValue result;
+    result.Set("success", false);
+    result.Set("error", err_msg);
+    std::move(callback).Run(base::Value(std::move(result)));
     return;
   }
 
@@ -312,7 +316,10 @@ void PdfTool::OnPrintToPdfResponse(
 
   if (!b64_data || b64_data->empty()) {
     LOG(WARNING) << "[PdfTool] PDF 데이터가 비어있음";
-    std::move(callback).Run(MakeErrorResult("PDF 데이터가 비어있습니다"));
+    base::DictValue result;
+    result.Set("success", false);
+    result.Set("error", "PDF 데이터가 비어있습니다");
+    std::move(callback).Run(base::Value(std::move(result)));
     return;
   }
 
@@ -326,8 +333,10 @@ void PdfTool::OnPrintToPdfResponse(
     std::string pdf_bytes;
     if (!base::Base64Decode(*b64_data, &pdf_bytes)) {
       LOG(ERROR) << "[PdfTool] base64 디코딩 실패";
-      std::move(callback).Run(
-          MakeErrorResult("PDF 데이터 디코딩에 실패했습니다"));
+      base::DictValue result;
+      result.Set("success", false);
+      result.Set("error", "PDF 데이터 디코딩에 실패했습니다");
+      std::move(callback).Run(base::Value(std::move(result)));
       return;
     }
 
@@ -337,8 +346,10 @@ void PdfTool::OnPrintToPdfResponse(
     bool write_ok = base::WriteFile(file_path, pdf_bytes);
     if (!write_ok) {
       LOG(ERROR) << "[PdfTool] 파일 저장 실패: " << save_path;
-      std::move(callback).Run(
-          MakeErrorResult("파일 저장에 실패했습니다: " + save_path));
+      base::DictValue result;
+      result.Set("success", false);
+      result.Set("error", "파일 저장에 실패했습니다: " + save_path);
+      std::move(callback).Run(base::Value(std::move(result)));
       return;
     }
 
@@ -357,7 +368,11 @@ void PdfTool::OnPrintToPdfResponse(
   // -------------------------------------------------------------------------
   // savePath 미지정: base64 데이터를 그대로 응답으로 반환
   // -------------------------------------------------------------------------
-  std::move(callback).Run(MakeImageResult(*b64_data, "application/pdf"));
+  base::DictValue result;
+  result.Set("success", true);
+  result.Set("data", *b64_data);  // base64 인코딩된 PDF
+  result.Set("mimeType", "application/pdf");
+  std::move(callback).Run(MakeJsonResult(std::move(result)));
 }
 
 }  // namespace mcp

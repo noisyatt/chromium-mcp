@@ -124,7 +124,9 @@ void HistoryTool::Execute(const base::DictValue& arguments,
                           base::OnceCallback<void(base::Value)> callback) {
   const std::string* action_ptr = arguments.FindString("action");
   if (!action_ptr) {
-    std::move(callback).Run(MakeErrorResult("action 파라미터가 필요합니다"));
+    base::DictValue err;
+    err.Set("error", "action 파라미터가 필요합니다");
+    std::move(callback).Run(base::Value(std::move(err)));
     return;
   }
 
@@ -145,7 +147,9 @@ void HistoryTool::Execute(const base::DictValue& arguments,
   } else if (action == "delete") {
     const std::string* url = arguments.FindString("url");
     if (!url || url->empty()) {
-      std::move(callback).Run(MakeErrorResult("delete 액션에는 url 파라미터가 필요합니다"));
+      base::DictValue err;
+      err.Set("error", "delete 액션에는 url 파라미터가 필요합니다");
+      std::move(callback).Run(base::Value(std::move(err)));
       return;
     }
     ExecuteDelete(*url, session, std::move(callback));
@@ -154,8 +158,10 @@ void HistoryTool::Execute(const base::DictValue& arguments,
     const std::string* st = arguments.FindString("startTime");
     const std::string* et = arguments.FindString("endTime");
     if (!st || !et) {
-      std::move(callback).Run(MakeErrorResult(
-          "deleteRange 액션에는 startTime, endTime 파라미터가 필요합니다"));
+      base::DictValue err;
+      err.Set("error",
+              "deleteRange 액션에는 startTime, endTime 파라미터가 필요합니다");
+      std::move(callback).Run(base::Value(std::move(err)));
       return;
     }
     ExecuteDeleteRange(*st, *et, session, std::move(callback));
@@ -164,7 +170,9 @@ void HistoryTool::Execute(const base::DictValue& arguments,
     ExecuteDeleteAll(session, std::move(callback));
 
   } else {
-    std::move(callback).Run(MakeErrorResult("알 수 없는 action: " + action));
+    base::DictValue err;
+    err.Set("error", "알 수 없는 action: " + action);
+    std::move(callback).Run(base::Value(std::move(err)));
   }
 }
 
@@ -181,8 +189,9 @@ void HistoryTool::ExecuteSearch(
 
   history::HistoryService* hs = GetHistoryService(session);
   if (!hs) {
-    std::move(callback).Run(MakeErrorResult(
-        "HistoryService를 가져올 수 없습니다 (프로파일 오류)"));
+    base::DictValue err;
+    err.Set("error", "HistoryService를 가져올 수 없습니다 (프로파일 오류)");
+    std::move(callback).Run(base::Value(std::move(err)));
     return;
   }
 
@@ -220,13 +229,17 @@ void HistoryTool::ExecuteDelete(const std::string& url,
                                 base::OnceCallback<void(base::Value)> callback) {
   history::HistoryService* hs = GetHistoryService(session);
   if (!hs) {
-    std::move(callback).Run(MakeErrorResult("HistoryService를 가져올 수 없습니다"));
+    base::DictValue err;
+    err.Set("error", "HistoryService를 가져올 수 없습니다");
+    std::move(callback).Run(base::Value(std::move(err)));
     return;
   }
 
   GURL gurl(url);
   if (!gurl.is_valid()) {
-    std::move(callback).Run(MakeErrorResult("유효하지 않은 URL: " + url));
+    base::DictValue err;
+    err.Set("error", "유효하지 않은 URL: " + url);
+    std::move(callback).Run(base::Value(std::move(err)));
     return;
   }
 
@@ -255,7 +268,9 @@ void HistoryTool::ExecuteDeleteRange(
 
   history::HistoryService* hs = GetHistoryService(session);
   if (!hs) {
-    std::move(callback).Run(MakeErrorResult("HistoryService를 가져올 수 없습니다"));
+    base::DictValue err;
+    err.Set("error", "HistoryService를 가져올 수 없습니다");
+    std::move(callback).Run(base::Value(std::move(err)));
     return;
   }
 
@@ -263,11 +278,15 @@ void HistoryTool::ExecuteDeleteRange(
   base::Time t_end   = ParseIsoTime(end_time);
 
   if (t_start.is_null()) {
-    std::move(callback).Run(MakeErrorResult("startTime 파싱 실패: " + start_time));
+    base::DictValue err;
+    err.Set("error", "startTime 파싱 실패: " + start_time);
+    std::move(callback).Run(base::Value(std::move(err)));
     return;
   }
   if (t_end.is_null()) {
-    std::move(callback).Run(MakeErrorResult("endTime 파싱 실패: " + end_time));
+    base::DictValue err;
+    err.Set("error", "endTime 파싱 실패: " + end_time);
+    std::move(callback).Run(base::Value(std::move(err)));
     return;
   }
 
@@ -304,7 +323,9 @@ void HistoryTool::ExecuteDeleteAll(
 
   history::HistoryService* hs = GetHistoryService(session);
   if (!hs) {
-    std::move(callback).Run(MakeErrorResult("HistoryService를 가져올 수 없습니다"));
+    base::DictValue err;
+    err.Set("error", "HistoryService를 가져올 수 없습니다");
+    std::move(callback).Run(base::Value(std::move(err)));
     return;
   }
 

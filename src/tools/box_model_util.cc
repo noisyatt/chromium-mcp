@@ -69,6 +69,7 @@ base::Value MakeImageResult(const std::string& data,
   item.Set("mimeType", mime_type);
   content.Append(std::move(item));
   result.Set("content", std::move(content));
+  result.Set("isError", false);
   return base::Value(std::move(result));
 }
 

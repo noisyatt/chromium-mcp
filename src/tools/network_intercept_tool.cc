@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <utility>
 
+#include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -14,7 +15,6 @@
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_session.h"
 #include "chrome/browser/mcp/mcp_tool_registry.h"
-#include "chrome/browser/mcp/tools/box_model_util.h"
 
 namespace mcp {
 
@@ -533,8 +533,18 @@ void NetworkInterceptTool::HandleAddRule(
             << " action=" << rules_[assigned_rule_id].action;
 
   // 성공 응답: 등록된 ruleId를 포함하여 반환
-  std::move(callback).Run(
-      MakeSuccessResult("규칙이 등록되었습니다. ruleId: " + assigned_rule_id));
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue content_item;
+  content_item.Set("type", "text");
+  content_item.Set(
+      "text", "규칙이 등록되었습니다. ruleId: " + assigned_rule_id);
+  content.Append(std::move(content_item));
+  result.Set("content", std::move(content));
+  // 편의를 위해 ruleId를 최상위에도 포함
+  result.Set("ruleId", assigned_rule_id);
+
+  std::move(callback).Run(base::Value(std::move(result)));
 }
 
 void NetworkInterceptTool::HandleRemoveRule(
@@ -1143,5 +1153,35 @@ base::ListValue NetworkInterceptTool::HeaderDictToEntries(
   return entries;
 }
 
+// static
+base::Value NetworkInterceptTool::MakeErrorResult(
+    const std::string& message) {
+  // MCP tools/call 에러 응답 형식:
+  // {"isError": true, "content": [{"type": "text", "text": "오류 메시지"}]}
+  base::DictValue result;
+  result.Set("isError", true);
+  base::ListValue content;
+  base::DictValue content_item;
+  content_item.Set("type", "text");
+  content_item.Set("text", message);
+  content.Append(std::move(content_item));
+  result.Set("content", std::move(content));
+  return base::Value(std::move(result));
+}
+
+// static
+base::Value NetworkInterceptTool::MakeSuccessResult(
+    const std::string& message) {
+  // MCP tools/call 성공 응답 형식:
+  // {"content": [{"type": "text", "text": "성공 메시지"}]}
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue content_item;
+  content_item.Set("type", "text");
+  content_item.Set("text", message);
+  content.Append(std::move(content_item));
+  result.Set("content", std::move(content));
+  return base::Value(std::move(result));
+}
 
 }  // namespace mcp

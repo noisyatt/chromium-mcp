@@ -399,6 +399,15 @@ base::Value BookmarkTool::ExecuteMove(const std::string& bookmark_id,
     return MakeErrorResult("루트 폴더(영구 노드)는 이동할 수 없습니다");
   }
 
+  // 자기 자신의 폴더로 이동 방지
+  if (node->parent() == dest) {
+    return MakeErrorResult("이미 해당 폴더에 있습니다");
+  }
+  // 자손으로 이동 방지 (순환 참조)
+  if (dest->HasAncestor(node)) {
+    return MakeErrorResult("하위 폴더로 이동할 수 없습니다 (순환 참조)");
+  }
+
   LOG(INFO) << "[BookmarkTool] 북마크 이동 id=" << bid
             << " → folder=" << did;
 

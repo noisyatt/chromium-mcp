@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/memory/weak_ptr.h"
+#include "base/timer/timer.h"
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_tool_registry.h"
 
@@ -137,6 +138,12 @@ class PerformanceTool : public McpTool {
 
   // stopTrace 시 사용할 McpSession 포인터 (이벤트 핸들러 해제용)
   McpSession* tracing_session_ = nullptr;
+
+  // tracingComplete 미수신 시 타임아웃 (30초)
+  base::OneShotTimer trace_timeout_timer_;
+
+  // 타임아웃 발생 시 호출
+  void OnTraceTimeout();
 
   base::WeakPtrFactory<PerformanceTool> weak_factory_{this};
 };

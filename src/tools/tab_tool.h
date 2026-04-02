@@ -84,6 +84,12 @@ class TabsTool : public McpTool {
                                         int tab_index,
                                         bool is_active);
 
+  // MCP 오류 응답 생성 헬퍼.
+  static base::Value MakeError(const std::string& message);
+
+  // MCP 성공 응답 생성 헬퍼 (텍스트 내용).
+  static base::Value MakeSuccess(const std::string& text);
+
   // 약한 참조 팩토리 (비동기 콜백에서 this 댕글링 방지)
   base::WeakPtrFactory<TabsTool> weak_factory_{this};
 };

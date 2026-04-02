@@ -6,13 +6,13 @@
 
 #include <utility>
 
+#include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_session.h"
 #include "chrome/browser/mcp/mcp_tool_registry.h"
-#include "chrome/browser/mcp/tools/box_model_util.h"
 
 namespace mcp {
 
@@ -117,7 +117,15 @@ void NetworkCaptureTool::Execute(
   const std::string* action = arguments.FindString("action");
   if (!action || action->empty()) {
     LOG(WARNING) << "[MCP][NetworkCapture] action 파라미터 누락";
-    std::move(callback).Run(MakeErrorResult("오류: action 파라미터가 필요합니다 (start 또는 stop)"));
+    base::DictValue error_result;
+    error_result.Set("isError", true);
+    base::ListValue content;
+    base::DictValue content_item;
+    content_item.Set("type", "text");
+    content_item.Set("text", "오류: action 파라미터가 필요합니다 (start 또는 stop)");
+    content.Append(std::move(content_item));
+    error_result.Set("content", std::move(content));
+    std::move(callback).Run(base::Value(std::move(error_result)));
     return;
   }
 
@@ -138,7 +146,15 @@ void NetworkCaptureTool::Execute(
     HandleStop(session, std::move(callback));
   } else {
     LOG(WARNING) << "[MCP][NetworkCapture] 알 수 없는 action: " << *action;
-    std::move(callback).Run(MakeErrorResult("오류: action은 'start' 또는 'stop'이어야 합니다"));
+    base::DictValue error_result;
+    error_result.Set("isError", true);
+    base::ListValue content;
+    base::DictValue content_item;
+    content_item.Set("type", "text");
+    content_item.Set("text", "오류: action은 'start' 또는 'stop'이어야 합니다");
+    content.Append(std::move(content_item));
+    error_result.Set("content", std::move(content));
+    std::move(callback).Run(base::Value(std::move(error_result)));
   }
 }
 
@@ -207,7 +223,16 @@ void NetworkCaptureTool::OnNetworkEnabled(
       std::string err_text =
           msg ? *msg : "Network.enable 실패 (알 수 없는 오류)";
       LOG(ERROR) << "[MCP][NetworkCapture] Network.enable 실패: " << err_text;
-      std::move(callback).Run(MakeErrorResult("네트워크 캡처 시작 실패: " + err_text));
+
+      base::DictValue error_result;
+      error_result.Set("isError", true);
+      base::ListValue content;
+      base::DictValue content_item;
+      content_item.Set("type", "text");
+      content_item.Set("text", "네트워크 캡처 시작 실패: " + err_text);
+      content.Append(std::move(content_item));
+      error_result.Set("content", std::move(content));
+      std::move(callback).Run(base::Value(std::move(error_result)));
       return;
     }
   }
@@ -251,10 +276,17 @@ void NetworkCaptureTool::OnNetworkEnabled(
   LOG(INFO) << "[MCP][NetworkCapture] 캡처 시작 완료. 이벤트 대기 중.";
 
   // 성공 응답 반환
-  std::move(callback).Run(MakeSuccessResult(
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue content_item;
+  content_item.Set("type", "text");
+  content_item.Set("text",
                    "네트워크 캡처가 시작되었습니다. "
                    "network_requests 도구로 중간 결과를 조회하거나, "
-                   "action=stop으로 캡처를 중지하고 전체 결과를 받을 수 있습니다."));
+                   "action=stop으로 캡처를 중지하고 전체 결과를 받을 수 있습니다.");
+  content.Append(std::move(content_item));
+  result.Set("content", std::move(content));
+  std::move(callback).Run(base::Value(std::move(result)));
 }
 
 void NetworkCaptureTool::HandleStop(
@@ -262,9 +294,17 @@ void NetworkCaptureTool::HandleStop(
     base::OnceCallback<void(base::Value)> callback) {
   if (!is_capturing_) {
     LOG(WARNING) << "[MCP][NetworkCapture] 캡처가 시작되지 않았는데 stop 요청";
-    std::move(callback).Run(MakeErrorResult(
+    base::DictValue error_result;
+    error_result.Set("isError", true);
+    base::ListValue content;
+    base::DictValue content_item;
+    content_item.Set("type", "text");
+    content_item.Set("text",
                      "오류: 캡처가 진행 중이지 않습니다. "
-                     "먼저 action=start로 캡처를 시작하세요."));
+                     "먼저 action=start로 캡처를 시작하세요.");
+    content.Append(std::move(content_item));
+    error_result.Set("content", std::move(content));
+    std::move(callback).Run(base::Value(std::move(error_result)));
     return;
   }
 
@@ -618,13 +658,27 @@ base::Value NetworkCaptureTool::SerializeRequests() const {
     requests_list.Append(std::move(req_dict));
   }
 
-  // 결과를 MakeJsonResult 로 직렬화하여 반환
+  // 결과를 JSON 문자열로 직렬화하여 content[].text 에 담아 반환
   base::DictValue data;
   data.Set("capturedCount",
            static_cast<int>(captured_requests_.size()));
   data.Set("requests", std::move(requests_list));
 
-  return MakeJsonResult(std::move(data));
+  std::string json_str;
+  base::JSONWriter::WriteWithOptions(
+      base::Value(std::move(data)),
+      base::JSONWriter::OPTIONS_PRETTY_PRINT,
+      &json_str);
+
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue content_item;
+  content_item.Set("type", "text");
+  content_item.Set("text", json_str);
+  content.Append(std::move(content_item));
+  result.Set("content", std::move(content));
+
+  return base::Value(std::move(result));
 }
 
 // ============================================================================
@@ -724,7 +778,21 @@ void NetworkRequestsTool::Execute(
   data.Set("filteredStatic", filtered_count);
   data.Set("requests", std::move(requests_list));
 
-  std::move(callback).Run(MakeJsonResult(std::move(data)));
+  std::string json_str;
+  base::JSONWriter::WriteWithOptions(
+      base::Value(std::move(data)),
+      base::JSONWriter::OPTIONS_PRETTY_PRINT,
+      &json_str);
+
+  base::DictValue result;
+  base::ListValue content;
+  base::DictValue content_item;
+  content_item.Set("type", "text");
+  content_item.Set("text", json_str);
+  content.Append(std::move(content_item));
+  result.Set("content", std::move(content));
+
+  std::move(callback).Run(base::Value(std::move(result)));
 }
 
 }  // namespace mcp

@@ -343,6 +343,12 @@ void KeyboardTool::Execute(const base::DictValue& arguments,
               << " delay=" << delay_ms << "ms";
 
     if (delay_ms > 0) {
+      // 이전 type(delay) 요청이 아직 진행 중이면 에러 반환
+      if (char_delay_timer_.IsRunning()) {
+        std::move(callback).Run(
+            MakeErrorResult("이전 type(delay) 요청이 진행 중입니다"));
+        return;
+      }
       // 글자별 딜레이 모드
       ExecuteTypeWithDelay(*text, delay_ms, session, std::move(callback));
     } else {

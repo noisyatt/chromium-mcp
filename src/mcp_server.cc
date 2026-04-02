@@ -695,8 +695,20 @@ void McpServer::HandleUnknownMethod(int client_id, const base::Value* id,
 
 void McpServer::SendResult(int client_id, const base::Value* id,
                             base::Value result) {
-  // 도구별로 MakeJsonResult/MakeSuccessResult/MakeErrorResult/MakeImageResult를
-  // 사용하므로 여기서 추가 정규화 불필요.
+  // 방어적 검증: content[] 형식이 아니면 텍스트로 래핑
+  if (result.is_dict() && !result.GetDict().FindList("content")) {
+    std::string json_text;
+    base::JSONWriter::Write(result, &json_text);
+    base::DictValue wrapped;
+    base::ListValue cl;
+    base::DictValue item;
+    item.Set("type", "text");
+    item.Set("text", json_text.empty() ? "{}" : json_text);
+    cl.Append(std::move(item));
+    wrapped.Set("content", std::move(cl));
+    result = base::Value(std::move(wrapped));
+  }
+
   base::DictValue response;
   response.Set("jsonrpc", "2.0");
   if (id) {
@@ -733,6 +745,10 @@ void McpServer::SendMessage(int client_id, base::DictValue message) {
   std::string json_output;
   if (!base::JSONWriter::Write(base::Value(std::move(message)), &json_output)) {
     LOG(ERROR) << "[MCP] JSON 직렬화 실패";
+    if (transport_) {
+      transport_->Send(client_id,
+          R"({"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal: JSON serialization failed"}})");
+    }
     return;
   }
 
