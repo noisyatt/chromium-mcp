@@ -128,9 +128,7 @@ void ConsoleTool::Execute(const base::DictValue& arguments,
                           base::OnceCallback<void(base::Value)> callback) {
   const std::string* action_ptr = arguments.FindString("action");
   if (!action_ptr || action_ptr->empty()) {
-    base::DictValue err;
-    err.Set("error", "action 파라미터가 필요합니다 (start/stop/get/clear)");
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeErrorResult("action 파라미터가 필요합니다 (start/stop/get/clear)"));
     return;
   }
   const std::string& action = *action_ptr;
@@ -165,9 +163,7 @@ void ConsoleTool::Execute(const base::DictValue& arguments,
     ClearMessages(std::move(callback));
 
   } else {
-    base::DictValue err;
-    err.Set("error", "유효하지 않은 action: " + action);
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(MakeErrorResult("유효하지 않은 action: " + action));
   }
 }
 
@@ -208,10 +204,7 @@ void ConsoleTool::OnLogEnabled(McpSession* session,
       const std::string* msg = err->FindString("message");
       std::string err_msg = msg ? *msg : "Log.enable 실패";
       LOG(ERROR) << "[ConsoleTool] Log.enable 오류: " << err_msg;
-      base::DictValue result;
-      result.Set("success", false);
-      result.Set("error", err_msg);
-      std::move(callback).Run(base::Value(std::move(result)));
+      std::move(callback).Run(MakeErrorResult(err_msg));
       return;
     }
   }
@@ -315,10 +308,7 @@ void ConsoleTool::OnRuntimeEnabled(McpSession* session,
       const std::string* msg = err->FindString("message");
       std::string err_msg = msg ? *msg : "Runtime.enable 실패";
       LOG(ERROR) << "[ConsoleTool] Runtime.enable 오류: " << err_msg;
-      base::DictValue result;
-      result.Set("success", false);
-      result.Set("error", err_msg);
-      std::move(callback).Run(base::Value(std::move(result)));
+      std::move(callback).Run(MakeErrorResult(err_msg));
       return;
     }
   }

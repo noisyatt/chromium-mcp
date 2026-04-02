@@ -185,11 +185,9 @@ void WaitTool::Execute(const base::DictValue& arguments,
   // type 파라미터 추출 (필수)
   const std::string* type_ptr = arguments.FindString("type");
   if (!type_ptr || type_ptr->empty()) {
-    base::DictValue err;
-    err.Set("error",
+    std::move(callback).Run(MakeErrorResult(
             "type 파라미터가 필요합니다 "
-            "(time/text/textGone/selector/navigation/networkIdle)");
-    std::move(callback).Run(base::Value(std::move(err)));
+            "(time/text/textGone/selector/navigation/networkIdle)"));
     return;
   }
   const std::string& wait_type = *type_ptr;
@@ -219,9 +217,7 @@ void WaitTool::Execute(const base::DictValue& arguments,
   } else if (wait_type == "text") {
     const std::string* text = arguments.FindString("text");
     if (!text || text->empty()) {
-      base::DictValue err;
-      err.Set("error", "type=text 일 때 text 파라미터가 필요합니다");
-      std::move(callback).Run(base::Value(std::move(err)));
+      std::move(callback).Run(MakeErrorResult("type=text 일 때 text 파라미터가 필요합니다"));
       return;
     }
     WaitForText(*text, /*wait_gone=*/false, timeout_ms, interval_ms,
@@ -230,9 +226,7 @@ void WaitTool::Execute(const base::DictValue& arguments,
   } else if (wait_type == "textGone") {
     const std::string* text = arguments.FindString("text");
     if (!text || text->empty()) {
-      base::DictValue err;
-      err.Set("error", "type=textGone 일 때 text 파라미터가 필요합니다");
-      std::move(callback).Run(base::Value(std::move(err)));
+      std::move(callback).Run(MakeErrorResult("type=textGone 일 때 text 파라미터가 필요합니다"));
       return;
     }
     WaitForText(*text, /*wait_gone=*/true, timeout_ms, interval_ms,
@@ -262,11 +256,9 @@ void WaitTool::Execute(const base::DictValue& arguments,
     }
 
     if (locator_params.empty()) {
-      base::DictValue err;
-      err.Set("error",
+      std::move(callback).Run(MakeErrorResult(
               "type=selector 일 때 role/name/text/selector/xpath 중 "
-              "하나 이상의 로케이터 파라미터가 필요합니다");
-      std::move(callback).Run(base::Value(std::move(err)));
+              "하나 이상의 로케이터 파라미터가 필요합니다"));
       return;
     }
 
@@ -284,11 +276,9 @@ void WaitTool::Execute(const base::DictValue& arguments,
                        std::move(callback));
 
   } else {
-    base::DictValue err;
-    err.Set("error",
+    std::move(callback).Run(MakeErrorResult(
             "유효하지 않은 type: " + wait_type +
-            ". time/text/textGone/selector/navigation/networkIdle 중 하나를 사용하세요");
-    std::move(callback).Run(base::Value(std::move(err)));
+            ". time/text/textGone/selector/navigation/networkIdle 중 하나를 사용하세요"));
   }
 }
 
@@ -561,14 +551,9 @@ void WaitTool::OnTimeout(std::shared_ptr<WaitContext> ctx) {
 
   LOG(WARNING) << "[WaitTool] 대기 timeout (" << ctx->condition_label << ")";
 
-  base::DictValue result;
-  result.Set("success", false);
-  result.Set("error",
+  std::move(ctx->callback).Run(MakeErrorResult(
              "대기 시간이 초과되었습니다: " + ctx->condition_label +
-             " (" + std::to_string(ctx->timeout_ms) + "ms)");
-  result.Set("timeoutMs", ctx->timeout_ms);
-  result.Set("condition", ctx->condition_label);
-  std::move(ctx->callback).Run(base::Value(std::move(result)));
+             " (" + std::to_string(ctx->timeout_ms) + "ms)"));
 }
 
 // ============================================================
@@ -623,10 +608,7 @@ void WaitTool::WaitForNavigation(int timeout_ms,
             sess->UnregisterCdpEventHandler(kLoadEventFiredEvent);
 
             LOG(WARNING) << "[WaitTool] 네비게이션 대기 timeout";
-            base::DictValue result;
-            result.Set("success", false);
-            result.Set("error", "페이지 로드 대기 시간이 초과되었습니다");
-            std::move(*cb_ptr).Run(base::Value(std::move(result)));
+            std::move(*cb_ptr).Run(MakeErrorResult("페이지 로드 대기 시간이 초과되었습니다"));
           },
           completed, cb, session));
 }
@@ -668,14 +650,12 @@ void WaitTool::WaitForNetworkIdle(int timeout_ms,
     t_timer->Stop();
     i_timer->Stop();
 
-    base::DictValue result;
     if (timed_out) {
       LOG(WARNING) << "[WaitTool] networkIdle 대기 timeout";
-      result.Set("success", false);
-      result.Set("error", "네트워크 idle 대기 시간이 초과되었습니다");
-      std::move(*cb_ptr).Run(base::Value(std::move(result)));
+      std::move(*cb_ptr).Run(MakeErrorResult("네트워크 idle 대기 시간이 초과되었습니다"));
     } else {
       LOG(INFO) << "[WaitTool] networkIdle 완료";
+      base::DictValue result;
       result.Set("success", true);
       result.Set("message", "네트워크가 idle 상태가 되었습니다");
       std::move(*cb_ptr).Run(MakeJsonResult(std::move(result)));
