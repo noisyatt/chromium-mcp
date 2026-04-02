@@ -51,29 +51,27 @@ class JavaScriptTool : public McpTool {
   // 모드 A: 메인 월드에서 Runtime.evaluate 직접 호출.
   void EvaluateInMainWorld(const std::string& expression,
                            bool await_promise,
+                           int timeout_ms,
                            McpSession* session,
                            base::OnceCallback<void(base::Value)> callback);
 
-  // 모드 B Step 1: Page.getFrameTree 로 메인 프레임 ID를 획득한다.
-  //               McpSession에 GetMainFrameId() API가 없으므로 CDP로 직접 조회.
   void GetFrameTreeForIsolatedWorld(
       const std::string& expression,
       bool await_promise,
+      int timeout_ms,
       McpSession* session,
       base::OnceCallback<void(base::Value)> callback);
 
-  // 모드 B Step 2: getFrameTree 응답에서 frameId를 추출 후
-  //               Page.createIsolatedWorld 호출.
   void OnGetFrameTree(const std::string& expression,
                       bool await_promise,
+                      int timeout_ms,
                       McpSession* session,
                       base::OnceCallback<void(base::Value)> callback,
                       base::Value response);
 
-  // 모드 B Step 3: createIsolatedWorld 응답에서 executionContextId 추출 후
-  //               해당 컨텍스트에서 Runtime.evaluate 호출.
   void OnIsolatedWorldCreated(const std::string& expression,
                               bool await_promise,
+                              int timeout_ms,
                               McpSession* session,
                               base::OnceCallback<void(base::Value)> callback,
                               base::Value response);

@@ -206,6 +206,10 @@ void JavaScriptTool::Execute(
   std::optional<bool> await_opt = arguments.FindBool("awaitPromise");
   bool await_promise = await_opt.value_or(true);
 
+  // timeout (밀리초): 기본 30초. awaitPromise=true일 때 특히 중요.
+  // 페이지 전환 중 실행 컨텍스트가 파괴되면 응답이 영원히 안 올 수 있음.
+  int timeout_ms = arguments.FindInt("timeout").value_or(30000);
+
   // isolatedWorld 기본값: false
   std::optional<bool> isolated_opt = arguments.FindBool("isolatedWorld");
   bool isolated_world = isolated_opt.value_or(false);
@@ -217,10 +221,11 @@ void JavaScriptTool::Execute(
 
   if (isolated_world) {
     // Isolated World 모드: 먼저 Page.getFrameTree로 메인 프레임 ID 획득
-    GetFrameTreeForIsolatedWorld(*expression, await_promise, session,
-                                 std::move(callback));
+    GetFrameTreeForIsolatedWorld(*expression, await_promise, timeout_ms,
+                                 session, std::move(callback));
   } else {
-    EvaluateInMainWorld(*expression, await_promise, session, std::move(callback));
+    EvaluateInMainWorld(*expression, await_promise, timeout_ms, session,
+                        std::move(callback));
   }
 }
 
@@ -233,21 +238,19 @@ void JavaScriptTool::Execute(
 void JavaScriptTool::EvaluateInMainWorld(
     const std::string& expression,
     bool await_promise,
+    int timeout_ms,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   base::DictValue params;
   params.Set("expression", expression);
-
-  // returnByValue: 결과를 JSON 직렬화 가능한 값으로 받는다.
-  // false이면 RemoteObjectId(참조)만 반환되어 후속 호출이 필요하다.
   params.Set("returnByValue", true);
-
-  // awaitPromise: expression이 Promise를 반환할 경우 완료 대기.
   params.Set("awaitPromise", await_promise);
-
-  // userGesture: true로 설정하면 click() 등 사용자 제스처가 필요한 API를
-  // 스크립트에서도 호출할 수 있다.
   params.Set("userGesture", true);
+
+  // timeout: 페이지 전환 시 실행 컨텍스트 파괴로 응답 유실 방지
+  if (timeout_ms > 0) {
+    params.Set("timeout", static_cast<double>(timeout_ms));
+  }
 
   // ★ contextId를 지정하지 않으면 현재 페이지의 기본 컨텍스트(메인 월드)에서 실행된다.
   // Runtime.enable 없이도 기본 컨텍스트 ID(1)는 항상 유효하다.
@@ -267,13 +270,14 @@ void JavaScriptTool::EvaluateInMainWorld(
 void JavaScriptTool::GetFrameTreeForIsolatedWorld(
     const std::string& expression,
     bool await_promise,
+    int timeout_ms,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback) {
   session->SendCdpCommand(
       "Page.getFrameTree", base::DictValue(),
       base::BindOnce(&JavaScriptTool::OnGetFrameTree,
                      weak_factory_.GetWeakPtr(),
-                     expression, await_promise,
+                     expression, await_promise, timeout_ms,
                      session, std::move(callback)));
 }
 
@@ -288,6 +292,7 @@ void JavaScriptTool::GetFrameTreeForIsolatedWorld(
 void JavaScriptTool::OnGetFrameTree(
     const std::string& expression,
     bool await_promise,
+    int timeout_ms,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
@@ -326,7 +331,7 @@ void JavaScriptTool::OnGetFrameTree(
       "Page.createIsolatedWorld", std::move(params),
       base::BindOnce(&JavaScriptTool::OnIsolatedWorldCreated,
                      weak_factory_.GetWeakPtr(),
-                     expression, await_promise,
+                     expression, await_promise, timeout_ms,
                      session, std::move(callback)));
 }
 
@@ -334,6 +339,7 @@ void JavaScriptTool::OnGetFrameTree(
 void JavaScriptTool::OnIsolatedWorldCreated(
     const std::string& expression,
     bool await_promise,
+    int timeout_ms,
     McpSession* session,
     base::OnceCallback<void(base::Value)> callback,
     base::Value response) {
@@ -375,6 +381,10 @@ void JavaScriptTool::OnIsolatedWorldCreated(
 
   // contextId를 명시하면 해당 Isolated World 컨텍스트에서만 실행된다.
   params.Set("contextId", *context_id);
+
+  if (timeout_ms > 0) {
+    params.Set("timeout", static_cast<double>(timeout_ms));
+  }
 
   session->SendCdpCommand(
       "Runtime.evaluate", std::move(params),
