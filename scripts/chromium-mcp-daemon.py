@@ -395,7 +395,7 @@ class InstancePool:
                     chosen = min(candidates, key=lambda rt: (rt.last_assigned_at, rt.spec.id))
                     chosen.active_sessions += 1
                     chosen.last_assigned_at = now
-                    if chosen.active_sessions >= chosen.spec.capacity:
+                    if chosen.spec.capacity > 0 and chosen.active_sessions >= chosen.spec.capacity:
                         chosen.state = InstanceState.UP_BUSY
                     else:
                         chosen.state = InstanceState.UP_IDLE
@@ -415,7 +415,7 @@ class InstancePool:
         with self._cond:
             if runtime.active_sessions > 0:
                 runtime.active_sessions -= 1
-            if runtime.state != InstanceState.DOWN and runtime.active_sessions < runtime.spec.capacity:
+            if runtime.state != InstanceState.DOWN and (runtime.spec.capacity == 0 or runtime.active_sessions < runtime.spec.capacity):
                 runtime.state = InstanceState.UP_IDLE
             self._cond.notify_all()
         log.info(
@@ -445,7 +445,7 @@ class InstancePool:
         with self._cond:
             runtime.consecutive_failures = 0
             runtime.last_healthy_at = time.monotonic()
-            if runtime.active_sessions < runtime.spec.capacity and runtime.state != InstanceState.DOWN:
+            if runtime.state != InstanceState.DOWN and (runtime.spec.capacity == 0 or runtime.active_sessions < runtime.spec.capacity):
                 runtime.state = InstanceState.UP_IDLE
             self._cond.notify_all()
 
@@ -455,8 +455,9 @@ class InstancePool:
     def _init_instance_states(self) -> None:
         for runtime in self._instances:
             spec = runtime.spec
-            if spec.capacity <= 0:
-                spec.capacity = 1
+            # capacity=0 → 무제한 (MCP 연결은 제한 없이 수락)
+            if spec.capacity < 0:
+                spec.capacity = 0
             if not spec.enabled:
                 runtime.state = InstanceState.DOWN
                 runtime.skip_reason = 'enabled=false'
@@ -478,9 +479,9 @@ class InstancePool:
     def _select_candidates_locked(self) -> list[InstanceRuntime]:
         return [
             rt for rt in self._instances
-            if rt.state == InstanceState.UP_IDLE
+            if rt.state in (InstanceState.UP_IDLE, InstanceState.UP_BUSY)
             and not rt.skip_reason
-            and rt.active_sessions < rt.spec.capacity
+            and (rt.spec.capacity == 0 or rt.active_sessions < rt.spec.capacity)
         ]
 
     def _refresh_cooldown_locked(self, now: float) -> None:
@@ -510,7 +511,7 @@ class InstancePool:
                     f'(fail={fail}/{threshold}, cooldown={self._cfg.healthcheck_cooldown_sec}s, reason={reason})'
                 )
             else:
-                if runtime.active_sessions < runtime.spec.capacity and runtime.state != InstanceState.DOWN:
+                if runtime.state != InstanceState.DOWN and (runtime.spec.capacity == 0 or runtime.active_sessions < runtime.spec.capacity):
                     runtime.state = InstanceState.UP_IDLE
                 log.warning(
                     f'인스턴스 실패 누적: {runtime.spec.id} '
@@ -785,7 +786,7 @@ def load_pool_config() -> PoolConfig:
         spec = InstanceSpec(
             id=str(item.get('id', f'instance-{len(cfg.instances) + 1}')),
             transport=transport,
-            capacity=max(1, int(item.get('capacity', 1))),
+            capacity=max(0, int(item.get('capacity', 0))),
             enabled=bool(item.get('enabled', True)),
             socket=str(item.get('socket', CHROMIUM_SOCKET)),
             host=str(item.get('host', '')),
