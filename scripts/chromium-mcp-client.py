@@ -82,6 +82,10 @@ def _normalize_mcp_response(body: bytes) -> bytes:
             return json.dumps(msg, ensure_ascii=False).encode('utf-8')
         return body
 
+    # 프로토콜 응답(initialize, tools/list)은 래핑하지 않고 통과
+    if 'protocolVersion' in result or 'tools' in result:
+        return body
+
     is_error = result.get('isError', False)
 
     # base64 이미지 감지
