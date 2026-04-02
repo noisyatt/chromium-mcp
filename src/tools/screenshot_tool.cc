@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/values.h"
 #include "chrome/browser/mcp/mcp_session.h"
+#include "chrome/browser/mcp/tools/box_model_util.h"
 
 namespace mcp {
 
@@ -139,9 +140,8 @@ void ScreenshotTool::QuerySelectorForScreenshot(
             // DOM.getDocument 응답에서 루트 nodeId 추출
             if (!get_doc_response.is_dict()) {
               LOG(ERROR) << "[ScreenshotTool] DOM.getDocument 응답 오류";
-              base::DictValue err;
-              err.Set("error", "DOM.getDocument 실패");
-              std::move(callback).Run(base::Value(std::move(err)));
+              std::move(callback).Run(
+                  MakeErrorResult("DOM.getDocument 실패"));
               return;
             }
 
@@ -149,18 +149,16 @@ void ScreenshotTool::QuerySelectorForScreenshot(
                 get_doc_response.GetDict().FindDict("root");
             if (!root) {
               LOG(ERROR) << "[ScreenshotTool] root 노드 없음";
-              base::DictValue err;
-              err.Set("error", "DOM 루트 노드를 찾을 수 없음");
-              std::move(callback).Run(base::Value(std::move(err)));
+              std::move(callback).Run(
+                  MakeErrorResult("DOM 루트 노드를 찾을 수 없음"));
               return;
             }
 
             std::optional<int> root_node_id = root->FindInt("nodeId");
             if (!root_node_id) {
               LOG(ERROR) << "[ScreenshotTool] 루트 nodeId 없음";
-              base::DictValue err;
-              err.Set("error", "루트 nodeId 추출 실패");
-              std::move(callback).Run(base::Value(std::move(err)));
+              std::move(callback).Run(
+                  MakeErrorResult("루트 nodeId 추출 실패"));
               return;
             }
 
@@ -182,9 +180,8 @@ void ScreenshotTool::QuerySelectorForScreenshot(
                       if (!qs_response.is_dict()) {
                         LOG(ERROR)
                             << "[ScreenshotTool] DOM.querySelector 응답 오류";
-                        base::DictValue err;
-                        err.Set("error", "DOM.querySelector 실패");
-                        std::move(cb).Run(base::Value(std::move(err)));
+                        std::move(cb).Run(
+                            MakeErrorResult("DOM.querySelector 실패"));
                         return;
                       }
 
@@ -193,9 +190,8 @@ void ScreenshotTool::QuerySelectorForScreenshot(
                       if (!node_id || *node_id == 0) {
                         LOG(WARNING)
                             << "[ScreenshotTool] selector에 해당하는 요소 없음";
-                        base::DictValue err;
-                        err.Set("error", "해당 selector의 요소를 찾을 수 없음");
-                        std::move(cb).Run(base::Value(std::move(err)));
+                        std::move(cb).Run(
+                            MakeErrorResult("해당 selector의 요소를 찾을 수 없음"));
                         return;
                       }
 
@@ -216,20 +212,16 @@ void ScreenshotTool::QuerySelectorForScreenshot(
                                 if (!bm_response.is_dict()) {
                                   LOG(ERROR) << "[ScreenshotTool] "
                                                 "DOM.getBoxModel 응답 오류";
-                                  base::DictValue err;
-                                  err.Set("error", "DOM.getBoxModel 실패");
                                   std::move(done).Run(
-                                      base::Value(std::move(err)));
+                                      MakeErrorResult("DOM.getBoxModel 실패"));
                                   return;
                                 }
 
                                 const base::DictValue* model =
                                     bm_response.GetDict().FindDict("model");
                                 if (!model) {
-                                  base::DictValue err;
-                                  err.Set("error", "boxModel 데이터 없음");
                                   std::move(done).Run(
-                                      base::Value(std::move(err)));
+                                      MakeErrorResult("boxModel 데이터 없음"));
                                   return;
                                 }
 
@@ -237,10 +229,8 @@ void ScreenshotTool::QuerySelectorForScreenshot(
                                 const base::ListValue* border =
                                     model->FindList("border");
                                 if (!border || border->size() < 8) {
-                                  base::DictValue err;
-                                  err.Set("error", "border 좌표 데이터 부족");
                                   std::move(done).Run(
-                                      base::Value(std::move(err)));
+                                      MakeErrorResult("border 좌표 데이터 부족"));
                                   return;
                                 }
 
@@ -279,27 +269,23 @@ void ScreenshotTool::QuerySelectorForScreenshot(
                                            base::Value cap_response) {
                                           // 최종 스크린샷 응답 처리
                                           if (!cap_response.is_dict()) {
-                                            base::DictValue err;
-                                            err.Set("error",
-                                                    "captureScreenshot 실패");
                                             std::move(final_cb).Run(
-                                                base::Value(std::move(err)));
+                                                MakeErrorResult(
+                                                    "captureScreenshot 실패"));
                                             return;
                                           }
                                           const std::string* data =
                                               cap_response.GetDict().FindString(
                                                   "data");
-                                          base::DictValue result;
                                           if (data) {
-                                            result.Set("data", *data);
-                                            result.Set("success", true);
+                                            std::move(final_cb).Run(
+                                                MakeImageResult(
+                                                    *data, "image/png"));
                                           } else {
-                                            result.Set("error",
-                                                       "이미지 데이터 없음");
-                                            result.Set("success", false);
+                                            std::move(final_cb).Run(
+                                                MakeErrorResult(
+                                                    "이미지 데이터 없음"));
                                           }
-                                          std::move(final_cb).Run(
-                                              base::Value(std::move(result)));
                                         },
                                         std::move(done)));
                               },
@@ -317,10 +303,8 @@ void ScreenshotTool::OnCaptureScreenshotResponse(
   // 성공 시 응답에는 base64 인코딩된 이미지 데이터("data" 필드)가 포함된다.
   if (!response.is_dict()) {
     LOG(ERROR) << "[ScreenshotTool] captureScreenshot 응답 형식 오류";
-    base::DictValue err;
-    err.Set("error", "captureScreenshot 응답 형식 오류");
-    err.Set("success", false);
-    std::move(callback).Run(base::Value(std::move(err)));
+    std::move(callback).Run(
+        MakeErrorResult("captureScreenshot 응답 형식 오류"));
     return;
   }
 
@@ -332,11 +316,7 @@ void ScreenshotTool::OnCaptureScreenshotResponse(
     const std::string* msg = error_dict->FindString("message");
     std::string error_msg = msg ? *msg : "알 수 없는 CDP 오류";
     LOG(ERROR) << "[ScreenshotTool] CDP 오류: " << error_msg;
-
-    base::DictValue result;
-    result.Set("success", false);
-    result.Set("error", error_msg);
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeErrorResult(error_msg));
     return;
   }
 
@@ -344,18 +324,12 @@ void ScreenshotTool::OnCaptureScreenshotResponse(
   const std::string* data = dict.FindString("data");
   if (!data || data->empty()) {
     LOG(WARNING) << "[ScreenshotTool] 이미지 데이터 비어있음";
-    base::DictValue result;
-    result.Set("success", false);
-    result.Set("error", "이미지 데이터 없음");
-    std::move(callback).Run(base::Value(std::move(result)));
+    std::move(callback).Run(MakeErrorResult("이미지 데이터 없음"));
     return;
   }
 
   LOG(INFO) << "[ScreenshotTool] 스크린샷 성공, data 길이=" << data->size();
-  base::DictValue result;
-  result.Set("success", true);
-  result.Set("data", *data);  // base64 인코딩된 이미지
-  std::move(callback).Run(base::Value(std::move(result)));
+  std::move(callback).Run(MakeImageResult(*data, "image/png"));
 }
 
 }  // namespace mcp
