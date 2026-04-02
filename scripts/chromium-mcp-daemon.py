@@ -574,19 +574,23 @@ def _close_quietly(obj) -> None:
         pass
 
 
-def _bridge(src, dst) -> None:
+def _bridge(src, dst, label: str = '') -> None:
     """src → dst 단방향 relay. MCP 프레이밍은 그대로 통과시킨다."""
     try:
         while True:
             data = src.recv(65536)
             if not data:
+                log.debug(f'[bridge:{label}] EOF from src')
                 break
+            log.debug(f'[bridge:{label}] relay {len(data)} bytes')
             dst.sendall(data)
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug(f'[bridge:{label}] exception: {e}')
     finally:
-        _close_quietly(src)
-        _close_quietly(dst)
+        try:
+            dst.shutdown(socket.SHUT_WR)
+        except Exception:
+            pass
 
 
 def _connect_unix_with_retry(path: str, retries: int = MAX_RETRY):
@@ -834,8 +838,8 @@ def handle_client(client_sock: socket.socket, pool: InstancePool) -> None:
             log.error(f'[{addr}] 백엔드 연결 실패 ({runtime.spec.id}): {e}')
             return
 
-        t1 = threading.Thread(target=_bridge, args=(client_sock, backend), daemon=True)
-        t2 = threading.Thread(target=_bridge, args=(backend, client_sock), daemon=True)
+        t1 = threading.Thread(target=_bridge, args=(client_sock, backend, f'{addr}:c→b'), daemon=True)
+        t2 = threading.Thread(target=_bridge, args=(backend, client_sock, f'{addr}:b→c'), daemon=True)
         t1.start()
         t2.start()
         t1.join()

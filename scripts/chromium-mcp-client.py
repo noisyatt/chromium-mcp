@@ -33,8 +33,37 @@ _IMAGE_PREFIXES = (b'iVBORw0KGgo', b'/9j/', b'R0lGOD', b'UklGR', b'Qk')
 _running = True
 
 
+def _unwrap_protocol_response(result: dict) -> dict | None:
+    """C++ NormalizeToolResult가 프로토콜 응답(initialize, tools/list)까지
+    content[]로 래핑해버린 경우, 원래 형태로 복원한다.
+    복원할 수 없으면 None을 반환한다."""
+    content = result.get('content')
+    if not isinstance(content, list) or len(content) != 1:
+        return None
+    item = content[0]
+    if item.get('type') != 'text':
+        return None
+    text = item.get('text', '')
+    try:
+        inner = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(inner, dict):
+        return None
+    # initialize 응답: protocolVersion 키 존재
+    if 'protocolVersion' in inner:
+        return inner
+    # tools/list 응답: tools 키 존재
+    if 'tools' in inner:
+        return inner
+    return None
+
+
 def _normalize_mcp_response(body: bytes) -> bytes:
-    """MCP 응답에 content[] 가 없으면 자동으로 래핑한다."""
+    """MCP 응답 정규화:
+    - 프로토콜 응답(initialize, tools/list)이 content[]로 잘못 래핑된 경우 → 언래핑
+    - 도구 응답에 content[]가 없는 경우 → 래핑
+    """
     try:
         msg = json.loads(body)
     except (json.JSONDecodeError, ValueError):
@@ -44,8 +73,13 @@ def _normalize_mcp_response(body: bytes) -> bytes:
     if not isinstance(result, dict):
         return body
 
-    # 이미 content[] 가 있으면 그대로
+    # content[]가 이미 있는 경우
     if isinstance(result.get('content'), list):
+        # 프로토콜 응답이 잘못 래핑된 경우 복원
+        unwrapped = _unwrap_protocol_response(result)
+        if unwrapped is not None:
+            msg['result'] = unwrapped
+            return json.dumps(msg, ensure_ascii=False).encode('utf-8')
         return body
 
     is_error = result.get('isError', False)
