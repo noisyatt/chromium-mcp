@@ -218,9 +218,11 @@ void TabsTool::HandleNew(const std::string& url,
     browser = nullptr;
   }
 
-  // fallback 1: BrowserList에서 사용 가능한 창 찾기
+  // fallback 1: 열린 창에서 사용 가능한 것 찾기
   if (!browser) {
-    for (Browser* b : *BrowserList::GetInstance()) {
+    auto all_windows = GetAllBrowserWindowInterfaces();
+    for (BrowserWindowInterface* bwi : all_windows) {
+      Browser* b = bwi->GetBrowserForMigrationOnly();
       if (is_usable(b)) {
         browser = b;
         break;

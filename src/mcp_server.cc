@@ -59,6 +59,9 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/browser/browser_thread.h"
@@ -328,9 +331,11 @@ McpSession* McpServer::GetSessionForClient(int client_id) {
       browser = nullptr;
     }
 
-    // fallback 1: BrowserList에서 사용 가능한 창 찾기
+    // fallback 1: 열린 창에서 사용 가능한 것 찾기
     if (!browser) {
-      for (Browser* b : *BrowserList::GetInstance()) {
+      auto all_windows = GetAllBrowserWindowInterfaces();
+      for (BrowserWindowInterface* bwi : all_windows) {
+        Browser* b = bwi->GetBrowserForMigrationOnly();
         if (is_usable_browser(b)) {
           browser = b;
           break;
