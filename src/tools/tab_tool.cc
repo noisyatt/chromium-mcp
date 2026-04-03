@@ -10,6 +10,7 @@
 #include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -206,11 +207,44 @@ void TabsTool::HandleList(base::OnceCallback<void(base::Value)> callback) {
 
 void TabsTool::HandleNew(const std::string& url,
                          base::OnceCallback<void(base::Value)> callback) {
-  // 현재 활성 Browser를 찾는다.
+  // 현재 활성 Browser를 찾는다 (3단계 fallback).
+  auto is_usable = [](Browser* b) -> bool {
+    return b && b->is_type_normal() && b->tab_strip_model() &&
+           !b->is_delete_scheduled();
+  };
+
   Browser* browser = chrome::FindLastActive();
+  if (!is_usable(browser)) {
+    browser = nullptr;
+  }
+
+  // fallback 1: BrowserList에서 사용 가능한 창 찾기
   if (!browser) {
-    LOG(ERROR) << "[MCP][Tabs] 활성 Browser 창 없음";
-    std::move(callback).Run(MakeError("열린 브라우저 창이 없습니다"));
+    for (Browser* b : *BrowserList::GetInstance()) {
+      if (is_usable(b)) {
+        browser = b;
+        break;
+      }
+    }
+  }
+
+  // fallback 2: 새 창 생성 (종료 중이 아닐 때만)
+  if (!browser) {
+    Profile* profile = ProfileManager::GetLastUsedProfileIfLoaded();
+    if (!profile || browser_shutdown::HasShutdownStarted()) {
+      std::move(callback).Run(MakeError("브라우저 창을 생성할 수 없습니다"));
+      return;
+    }
+    Browser::CreateParams params(profile, true);
+    browser = Browser::Create(params);
+    if (browser && browser->window()) {
+      browser->window()->Show();
+    }
+    LOG(INFO) << "[MCP][Tabs] 새 브라우저 창 생성";
+  }
+
+  if (!is_usable(browser)) {
+    std::move(callback).Run(MakeError("사용 가능한 브라우저 창이 없습니다"));
     return;
   }
 

@@ -57,6 +57,9 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/lifetime/browser_shutdown.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host.h"
@@ -314,18 +317,59 @@ McpSession* McpServer::GetSessionForClient(int client_id) {
 
   content::WebContents* wc = state_it->second.assigned_tab;
   if (!wc) {
-    // 배정된 탭이 없으면 현재 활성 탭에 자동 배정
+    // 배정된 탭이 없으면 Browser 찾기 (3단계 fallback)
+    auto is_usable_browser = [](Browser* b) -> bool {
+      return b && b->is_type_normal() && b->tab_strip_model() &&
+             !b->is_delete_scheduled();
+    };
+
     Browser* browser = chrome::FindLastActive();
-    if (!browser || !browser->tab_strip_model()) {
+    if (!is_usable_browser(browser)) {
+      browser = nullptr;
+    }
+
+    // fallback 1: BrowserList에서 사용 가능한 창 찾기
+    if (!browser) {
+      for (Browser* b : *BrowserList::GetInstance()) {
+        if (is_usable_browser(b)) {
+          browser = b;
+          break;
+        }
+      }
+    }
+
+    // fallback 2: 새 창 생성 (종료 중이 아닐 때만)
+    if (!browser) {
+      Profile* profile = ProfileManager::GetLastUsedProfileIfLoaded();
+      if (profile && !browser_shutdown::HasShutdownStarted()) {
+        Browser::CreateParams params(profile, true);
+        browser = Browser::Create(params);
+        if (browser && browser->window()) {
+          browser->window()->Show();
+        }
+        LOG(INFO) << "[MCP] 새 브라우저 창 생성 (client_id=" << client_id << ")";
+      }
+    }
+
+    if (!is_usable_browser(browser)) {
       return nullptr;
     }
+
     wc = browser->tab_strip_model()->GetActiveWebContents();
+
+    // 탭도 없으면 새 about:blank 탭 생성
+    if (!wc) {
+      chrome::AddTabAt(browser, GURL("about:blank"), -1, true);
+      wc = browser->tab_strip_model()->GetActiveWebContents();
+      LOG(INFO) << "[MCP] 새 about:blank 탭 생성 (client_id=" << client_id << ")";
+    }
+
     if (!wc) {
       return nullptr;
     }
     state_it->second.assigned_tab = wc;
     LOG(INFO) << "[MCP] client_id=" << client_id
-              << "에 활성 탭 자동 배정: " << wc->GetVisibleURL().spec();
+              << "에 탭 자동 배정: " << wc->GetVisibleURL().spec();
   }
 
   auto session_it = sessions_.find(wc);
