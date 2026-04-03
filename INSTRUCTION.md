@@ -43,7 +43,7 @@ Chromium 내장 MCP 서버
   "mcpServers": {
     "chromium-mcp": {
       "type": "stdio",
-      "command": "python3",
+      "command": "/opt/homebrew/bin/python3",
       "args": ["/Users/daniel/projects-noisyatt/chromium-mcp/scripts/chromium-mcp-launcher.py"],
       "env": {
         "CHROMIUM_MCP_BROWSER_PATH": "/Users/daniel/chromium/src/out/Default/Chromium.app/Contents/MacOS/Chromium"
